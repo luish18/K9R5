@@ -1,0 +1,35 @@
+{
+  "op": "mymatmul",
+  "results": [
+    {
+      "core": "cva6",
+      "status": "ok",
+      "cycles": 469273,
+      "instret": null,
+      "errors": 0,
+      "outputs": 1024,
+      "maxdiff": 0.0,
+      "sim_wall_s": 0.2
+    },
+    {
+      "core": "snitch",
+      "status": "ok",
+      "cycles": 206037,
+      "instret": null,
+      "errors": 0,
+      "outputs": 1024,
+      "maxdiff": 0.0,
+      "sim_wall_s": 1.1
+    },
+    {
+      "core": "spatz",
+      "status": "ok",
+      "cycles": 56736,
+      "instret": null,
+      "errors": 0,
+      "outputs": 1024,
+      "maxdiff": 4e-06,
+      "sim_wall_s": 0.9
+    }
+  ]
+}

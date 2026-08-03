@@ -1,0 +1,35 @@
+{
+  "op": "Kernels_Integer_GEMM_Regular",
+  "results": [
+    {
+      "core": "cva6",
+      "status": "ok",
+      "cycles": 574871,
+      "instret": null,
+      "errors": 0,
+      "outputs": 1024,
+      "maxdiff": 0.0,
+      "sim_wall_s": 0.2
+    },
+    {
+      "core": "snitch",
+      "status": "ok",
+      "cycles": 451666,
+      "instret": null,
+      "errors": 0,
+      "outputs": 1024,
+      "maxdiff": 0.0,
+      "sim_wall_s": 1.0
+    },
+    {
+      "core": "spatz",
+      "status": "ok",
+      "cycles": 82410,
+      "instret": null,
+      "errors": 0,
+      "outputs": 1024,
+      "maxdiff": 0.0,
+      "sim_wall_s": 0.9
+    }
+  ]
+}

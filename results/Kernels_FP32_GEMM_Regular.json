@@ -1,0 +1,35 @@
+{
+  "op": "Kernels_FP32_GEMM_Regular",
+  "results": [
+    {
+      "core": "cva6",
+      "status": "ok",
+      "cycles": 473324,
+      "instret": null,
+      "errors": 0,
+      "outputs": 1024,
+      "maxdiff": 3e-06,
+      "sim_wall_s": 0.3
+    },
+    {
+      "core": "snitch",
+      "status": "ok",
+      "cycles": 213628,
+      "instret": null,
+      "errors": 0,
+      "outputs": 1024,
+      "maxdiff": 3e-06,
+      "sim_wall_s": 1.4
+    },
+    {
+      "core": "spatz",
+      "status": "ok",
+      "cycles": 59804,
+      "instret": null,
+      "errors": 0,
+      "outputs": 1024,
+      "maxdiff": 3e-06,
+      "sim_wall_s": 0.9
+    }
+  ]
+}
