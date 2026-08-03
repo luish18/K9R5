@@ -1,0 +1,668 @@
+diff --git a/models/cpu/iss/include/isa/rv32v_timed.hpp b/models/cpu/iss/include/isa/rv32v_timed.hpp
+index dc73c3b..428ece3 100644
+--- a/models/cpu/iss/include/isa/rv32v_timed.hpp
++++ b/models/cpu/iss/include/isa/rv32v_timed.hpp
+@@ -1996,145 +1996,145 @@ static inline iss_reg_t vse64_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ 
+ static inline iss_reg_t vl1r_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vl1re8_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vl1re16_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vl1re32_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vl1re64_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vl2r_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vl2re8_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vl2re16_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vl2re32_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vl2re64_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vl4r_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vl4re8_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vl4re16_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vl4re32_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vl4re64_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vl8r_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vl8re8_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vl8re16_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vl8re32_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vl8re64_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vs1r_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vs2r_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vs4r_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+ static inline iss_reg_t vs8r_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+-    abort();
++    // Handled by the VLSU block like other vector loads/stores.
+     return iss_insn_next(iss, insn, pc);
+ }
+ 
+@@ -3950,6 +3950,166 @@ static inline iss_reg_t vsetvl_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ 
+ 
+ 
++// VXUNARY0 integer extension: vd[i] = extend(vs2[i]), where the source
++// element width is SEW/factor and the destination element width is SEW.
++static inline iss_reg_t vext_common_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc,
++    unsigned int factor, bool is_signed)
++{
++    unsigned int sewb = iss->vector.sewb;
++    unsigned int lmul = iss->vector.lmul;
++    unsigned int src_sewb = sewb / factor;
++    for (unsigned int i=VSTART; i<VEND; i++)
++    {
++        if (velem_is_active(iss, i, UIM_GET(0)))
++        {
++            uint64_t raw = velem_get_value(iss, REG_IN(0), i, src_sewb, lmul);
++            uint64_t res = is_signed ? (uint64_t)get_signed_value(raw, 64, src_sewb * 8)
++                                     : raw;
++            velem_set_value(iss, REG_OUT(0), i, sewb, res);
++        }
++    }
++    return iss_insn_next(iss, insn, pc);
++}
++
++static inline iss_reg_t vzext_vf8_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
++{
++    return vext_common_exec(iss, insn, pc, 8, false);
++}
++
++static inline iss_reg_t vsext_vf8_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
++{
++    return vext_common_exec(iss, insn, pc, 8, true);
++}
++
++static inline iss_reg_t vzext_vf4_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
++{
++    return vext_common_exec(iss, insn, pc, 4, false);
++}
++
++static inline iss_reg_t vsext_vf4_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
++{
++    return vext_common_exec(iss, insn, pc, 4, true);
++}
++
++static inline iss_reg_t vzext_vf2_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
++{
++    return vext_common_exec(iss, insn, pc, 2, false);
++}
++
++static inline iss_reg_t vsext_vf2_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
++{
++    return vext_common_exec(iss, insn, pc, 2, true);
++}
++
++// Widening add/sub with wide first operand: vd(2*SEW) = vs2(2*SEW) op vs1(SEW).
++// Format_OPV: REG_IN(0) = vs1 (narrow), REG_IN(1) = vs2 (wide).
++static inline iss_reg_t vw_op_wv_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc,
++    bool is_sub, bool is_signed)
++{
++    unsigned int sewb = iss->vector.sewb;
++    unsigned int lmul = iss->vector.lmul;
++    for (unsigned int i=VSTART; i<VEND; i++)
++    {
++        if (velem_is_active(iss, i, UIM_GET(0)))
++        {
++            uint64_t narrow_raw = velem_get_value(iss, REG_IN(0), i, sewb, lmul);
++            int64_t narrow = is_signed ? get_signed_value(narrow_raw, 64, sewb * 8)
++                                       : (int64_t)narrow_raw;
++            int64_t wide = (int64_t)velem_get_value(iss, REG_IN(1), i, 2 * sewb, lmul);
++            int64_t res = is_sub ? wide - narrow : wide + narrow;
++            velem_set_value(iss, REG_OUT(0), i, 2 * sewb, res);
++        }
++    }
++    return iss_insn_next(iss, insn, pc);
++}
++
++static inline iss_reg_t vw_op_wx_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc,
++    bool is_sub, bool is_signed)
++{
++    unsigned int sewb = iss->vector.sewb;
++    unsigned int lmul = iss->vector.lmul;
++    int64_t narrow = is_signed ? get_signed_value(REG_GET(0), 64, sewb * 8)
++                               : (int64_t)(REG_GET(0) & (sewb == 8 ? ~0ULL : ((1ULL << (sewb * 8)) - 1)));
++    for (unsigned int i=VSTART; i<VEND; i++)
++    {
++        if (velem_is_active(iss, i, UIM_GET(0)))
++        {
++            int64_t wide = (int64_t)velem_get_value(iss, REG_IN(1), i, 2 * sewb, lmul);
++            int64_t res = is_sub ? wide - narrow : wide + narrow;
++            velem_set_value(iss, REG_OUT(0), i, 2 * sewb, res);
++        }
++    }
++    return iss_insn_next(iss, insn, pc);
++}
++
++static inline iss_reg_t vwadd_wv_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
++{
++    return vw_op_wv_exec(iss, insn, pc, false, true);
++}
++
++static inline iss_reg_t vwadd_wx_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
++{
++    return vw_op_wx_exec(iss, insn, pc, false, true);
++}
++
++static inline iss_reg_t vwaddu_wv_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
++{
++    return vw_op_wv_exec(iss, insn, pc, false, false);
++}
++
++static inline iss_reg_t vwaddu_wx_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
++{
++    return vw_op_wx_exec(iss, insn, pc, false, false);
++}
++
++static inline iss_reg_t vwsub_wv_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
++{
++    return vw_op_wv_exec(iss, insn, pc, true, true);
++}
++
++static inline iss_reg_t vwsub_wx_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
++{
++    return vw_op_wx_exec(iss, insn, pc, true, true);
++}
++
++static inline iss_reg_t vwsubu_wv_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
++{
++    return vw_op_wv_exec(iss, insn, pc, true, false);
++}
++
++static inline iss_reg_t vwsubu_wx_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
++{
++    return vw_op_wx_exec(iss, insn, pc, true, false);
++}
++
++// Whole-register moves: copy nr full vector registers, independent of vl.
++static inline iss_reg_t vmvnr_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc, int nr)
++{
++    memcpy(&iss->vector.vregs[REG_OUT(0)][0], &iss->vector.vregs[REG_IN(0)][0],
++        nr * (CONFIG_ISS_VLEN / 8));
++    return iss_insn_next(iss, insn, pc);
++}
++
++static inline iss_reg_t vmv1r_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
++{
++    return vmvnr_v_exec(iss, insn, pc, 1);
++}
++
++static inline iss_reg_t vmv2r_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
++{
++    return vmvnr_v_exec(iss, insn, pc, 2);
++}
++
++static inline iss_reg_t vmv4r_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
++{
++    return vmvnr_v_exec(iss, insn, pc, 4);
++}
++
++static inline iss_reg_t vmv8r_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
++{
++    return vmvnr_v_exec(iss, insn, pc, 8);
++}
++
+ static inline iss_reg_t vwadd_vv_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
+ {
+     unsigned int sewb = iss->vector.sewb;
+diff --git a/models/cpu/iss/include/types.hpp b/models/cpu/iss/include/types.hpp
+index 879be48..5ea645c 100644
+--- a/models/cpu/iss/include/types.hpp
++++ b/models/cpu/iss/include/types.hpp
+@@ -513,6 +513,15 @@ public:
+     // True if the instruction is currently being chained.
+     bool chained;
+     int id;
++    // Vector configuration captured at enqueue time. The functional handler
++    // runs at completion time, by which later vsetvl instructions executed on
++    // the scalar core may already have changed vl/vtype, so the state active
++    // when the instruction was issued must be restored around the handler.
++    uint64_t vl;
++    uint64_t vstart;
++    int vsew;
++    float vlmul;
++    unsigned int vsewb;
+ };
+ 
+ 
+diff --git a/models/cpu/iss/isa_gen/isa_rvv_timed.py b/models/cpu/iss/isa_gen/isa_rvv_timed.py
+index a32dfa7..01f3b25 100644
+--- a/models/cpu/iss/isa_gen/isa_rvv_timed.py
++++ b/models/cpu/iss/isa_gen/isa_rvv_timed.py
+@@ -34,6 +34,15 @@ Format_OPV_0 = [ OutVReg     (0, Range(7 , 5)),
+                InReg      (0, Range(15, 5))
+ ]
+ 
++# Like Format_OPV but with an integer destination register (e.g. vmv.x.s).
++# The output must not be declared as a vector register, otherwise the core's
++# offload logic does not track the scalar write and readers see stale values.
++Format_OPV_XS = [ OutReg     (0, Range(7 , 5)),
++               InVReg      (0, Range(15, 5)),
++               InVReg      (1, Range(20, 5)),
++               UnsignedImm(0, Range(25, 1)),
++]
++
+ Format_OPV_1 = [
+     OutFReg    (0, Range(7 , 5), f='sew'),
+     InVRegF    (0, Range(20, 5)),
+@@ -356,11 +365,35 @@ class Rv32v(IsaSubset):
+             Instr('vmv.v.i'       ,   Format_OPIVI,    '010111 - ----- ----- 011 ----- 1010111'),
+             Instr('vmv.v.x'       ,   Format_OPV  ,    '010111 - ----- ----- 100 ----- 1010111'),
+             Instr('vmv.s.x'       ,   Format_OPV_0  ,    '010000 - 00000 ----- 110 ----- 1010111'),
+-            Instr('vmv.x.s'       ,   Format_OPV  ,    '010000 - ----- 00000 010 ----- 1010111'),
++            Instr('vmv.x.s'       ,   Format_OPV_XS  ,    '010000 - ----- 00000 010 ----- 1010111'),
+ 
+             Instr('vwadd.vv'      ,   Format_OPV  ,    '110001 - ----- ----- 010 ----- 1010111'),
+             Instr('vwadd.vx'      ,   Format_OPV  ,    '110001 - ----- ----- 110 ----- 1010111'),
+ 
++            # VXUNARY0: integer extension (vzext/vsext)
++            Instr('vzext.vf8'     ,   Format_OPV_10  ,    '010010 - ----- 00010 010 ----- 1010111'),
++            Instr('vsext.vf8'     ,   Format_OPV_10  ,    '010010 - ----- 00011 010 ----- 1010111'),
++            Instr('vzext.vf4'     ,   Format_OPV_10  ,    '010010 - ----- 00100 010 ----- 1010111'),
++            Instr('vsext.vf4'     ,   Format_OPV_10  ,    '010010 - ----- 00101 010 ----- 1010111'),
++            Instr('vzext.vf2'     ,   Format_OPV_10  ,    '010010 - ----- 00110 010 ----- 1010111'),
++            Instr('vsext.vf2'     ,   Format_OPV_10  ,    '010010 - ----- 00111 010 ----- 1010111'),
++
++            # Widening add/sub, wide first operand (vd(2*SEW) = vs2(2*SEW) op vs1(SEW))
++            Instr('vwadd.wv'      ,   Format_OPV  ,    '110101 - ----- ----- 010 ----- 1010111'),
++            Instr('vwadd.wx'      ,   Format_OPV  ,    '110101 - ----- ----- 110 ----- 1010111'),
++            Instr('vwaddu.wv'     ,   Format_OPV  ,    '110100 - ----- ----- 010 ----- 1010111'),
++            Instr('vwaddu.wx'     ,   Format_OPV  ,    '110100 - ----- ----- 110 ----- 1010111'),
++            Instr('vwsub.wv'      ,   Format_OPV  ,    '110111 - ----- ----- 010 ----- 1010111'),
++            Instr('vwsub.wx'      ,   Format_OPV  ,    '110111 - ----- ----- 110 ----- 1010111'),
++            Instr('vwsubu.wv'     ,   Format_OPV  ,    '110110 - ----- ----- 010 ----- 1010111'),
++            Instr('vwsubu.wx'     ,   Format_OPV  ,    '110110 - ----- ----- 110 ----- 1010111'),
++
++            # Whole-register moves
++            Instr('vmv1r.v'       ,   Format_OPV_10  ,    '100111 1 ----- 00000 011 ----- 1010111'),
++            Instr('vmv2r.v'       ,   Format_OPV_10  ,    '100111 1 ----- 00001 011 ----- 1010111'),
++            Instr('vmv4r.v'       ,   Format_OPV_10  ,    '100111 1 ----- 00011 011 ----- 1010111'),
++            Instr('vmv8r.v'       ,   Format_OPV_10  ,    '100111 1 ----- 00111 011 ----- 1010111'),
++
+             Instr('vwaddu.vv'     ,   Format_OPV  ,    '110000 - ----- ----- 010 ----- 1010111'),
+             Instr('vwaddu.vx'     ,   Format_OPV  ,    '110000 - ----- ----- 110 ----- 1010111'),
+ 
+diff --git a/models/cpu/iss/src/ara/ara.cpp b/models/cpu/iss/src/ara/ara.cpp
+index 9473134..235996a 100644
+--- a/models/cpu/iss/src/ara/ara.cpp
++++ b/models/cpu/iss/src/ara/ara.cpp
+@@ -189,9 +189,59 @@ void Ara::insn_end(PendingInsn *pending_insn)
+     this->current_insn_reg_2 = pending_insn->reg_2;
+     // Force trace dump since the core may be stalled which would skip trace
+     this->iss.trace.force_trace_dump = true;
++
++    // Instructions without a block (vsetvl) execute directly and their state
++    // changes must persist; only block-dispatched instructions carry captured
++    // state to restore.
++    if (insn->decoder_item->u.insn.block_id == -1)
++    {
++        insn->stub_handler(&this->iss, insn, pending_insn->pc);
++        this->iss.trace.force_trace_dump = false;
++        goto vector_state_done;
++    }
++    {
++
++    // Temporarily restore the vector configuration captured at dispatch time:
++    // later vsetvl instructions may already have changed it, and the handler
++    // must execute with the configuration the instruction was issued under.
++    uint64_t live_vl = this->iss.csr.vl.value;
++    uint64_t live_vstart = this->iss.csr.vstart.value;
++    int live_sew = this->iss.vector.sew;
++    float live_lmul = this->iss.vector.lmul;
++    unsigned int live_sewb = this->iss.vector.sewb;
++    uint8_t live_exp = this->iss.vector.exp;
++    uint8_t live_mant = this->iss.vector.mant;
++
++    this->iss.csr.vl.value = pending_insn->vl;
++    this->iss.csr.vstart.value = pending_insn->vstart;
++    this->iss.vector.sew = pending_insn->vsew;
++    this->iss.vector.lmul = pending_insn->vlmul;
++    this->iss.vector.sewb = pending_insn->vsewb;
++    // Same mapping as extract_format() in rv32v_timed.hpp
++    switch (pending_insn->vsewb * 8)
++    {
++        case 8:   this->iss.vector.exp = 5;  this->iss.vector.mant = 2;  break;
++        case 16:  this->iss.vector.exp = 5;  this->iss.vector.mant = 10; break;
++        case 32:  this->iss.vector.exp = 8;  this->iss.vector.mant = 23; break;
++        case 64:  this->iss.vector.exp = 11; this->iss.vector.mant = 52; break;
++        default: break;
++    }
++
+     insn->stub_handler(&this->iss, insn, pending_insn->pc);
++
++    this->iss.csr.vl.value = live_vl;
++    this->iss.csr.vstart.value = live_vstart;
++    this->iss.vector.sew = live_sew;
++    this->iss.vector.lmul = live_lmul;
++    this->iss.vector.sewb = live_sewb;
++    this->iss.vector.exp = live_exp;
++    this->iss.vector.mant = live_mant;
++
+     this->iss.trace.force_trace_dump = false;
+ 
++    }
++vector_state_done:;
++
+     // Mark output registers as ready in next cycle
+     for (int i=0; i<insn->nb_out_reg; i++)
+     {
+@@ -386,6 +436,17 @@ void Ara::fsm_handler(vp::Block *__this, vp::ClockEvent *event)
+                     AraBlock *block = _this->blocks[block_id];
+                     if (!block->is_full())
+                     {
++                        // Capture the vector configuration at dispatch time. All older
++                        // instructions (including vsetvl, which drains the queue) have
++                        // been dispatched in order, so vl/vtype are correct here, and
++                        // the deferred functional handler must use these values since
++                        // the live ones may change before it runs at completion time.
++                        pending_insn->vl = _this->iss.csr.vl.value;
++                        pending_insn->vstart = _this->iss.csr.vstart.value;
++                        pending_insn->vsew = _this->iss.vector.sew;
++                        pending_insn->vlmul = _this->iss.vector.lmul;
++                        pending_insn->vsewb = _this->iss.vector.sewb;
++
+                         // Mark output registers as being written
+                         for (int i=0; i<insn->nb_out_reg; i++)
+                         {
+diff --git a/models/cpu/iss/src/ara/ara_vcompute.cpp b/models/cpu/iss/src/ara/ara_vcompute.cpp
+index 8f34f53..681991e 100644
+--- a/models/cpu/iss/src/ara/ara_vcompute.cpp
++++ b/models/cpu/iss/src/ara/ara_vcompute.cpp
+@@ -118,10 +118,12 @@ void AraVcompute::fsm_handler(vp::Block *__this, vp::ClockEvent *event)
+         // a number of elements equal to the numbe of lanes multiplied by the number of elements each FPU can
+         // handle.
+         // Note that the number of elements already take into account lmul
+-        unsigned int nb_elems = (_this->ara.iss.csr.vl.value - _this->ara.iss.csr.vstart.value) /
++        // Use the vector configuration captured at enqueue time; the live one
++        // may already reflect a later vsetvl.
++        unsigned int nb_elems = (_this->pending_insn->vl - _this->pending_insn->vstart) /
+             _this->ara.nb_lanes;
+         int64_t end_cyclestamp = _this->ara.iss.top.clock.get_cycles() +
+-            nb_elems * _this->ara.iss.vector.sewb / _this->width + _this->pending_insn->insn->latency;
++            nb_elems * _this->pending_insn->vsewb / _this->width + _this->pending_insn->insn->latency;
+ 
+         // Only assign the end timestamp if the instruction is not chained
+         if (!_this->pending_insn->chained)
+diff --git a/models/cpu/iss/src/ara/ara_vlsu.cpp b/models/cpu/iss/src/ara/ara_vlsu.cpp
+index 9823de8..dec4b3c 100644
+--- a/models/cpu/iss/src/ara/ara_vlsu.cpp
++++ b/models/cpu/iss/src/ara/ara_vlsu.cpp
+@@ -103,26 +103,52 @@ void AraVlsu::handle_insn_load(AraVlsu *_this, iss_insn_t *insn)
+ {
+     // A load instruction is starting, just store information about the first burst and let
+     // the FSM handle all the bursts.
+-    unsigned int sewb = _this->ara.iss.vector.sewb;
+-    unsigned int lmul = _this->ara.iss.vector.lmul;
++    // Use the vector configuration captured at enqueue time; the live one may
++    // already reflect a later vsetvl executed by the core.
++    PendingInsn *pending = _this->insns[_this->insn_first_waiting].insn;
++    unsigned int sewb = pending->vsewb;
++    unsigned int lmul = pending->vlmul;
+     _this->pending_velem = velem_get(&_this->ara.iss, insn->out_regs[0], 0, sewb, lmul);
+-    _this->pending_addr = _this->insns[_this->insn_first_waiting].insn->reg;
++    _this->pending_addr = pending->reg;
+     _this->pending_is_write = false;
+     int elem_size = insn->uim[1] >= 5 ? 1 << (insn->uim[1] - 4) : 1 << 0;
+-    _this->pending_size = (_this->ara.iss.csr.vl.value - _this->ara.iss.csr.vstart.value) * elem_size;
++    _this->pending_size = (pending->vl - pending->vstart) * elem_size;
++
++    // Whole-register loads/stores (vl<nr>r.v / vs<nr>r.v: unit-stride with
++    // lumop/sumop == 0x08) transfer nr full registers regardless of vl.
++    uint32_t op = insn->opcode;
++    if (((op & 0x7f) == 0x07 || (op & 0x7f) == 0x27) &&
++        ((op >> 26) & 0x3) == 0 && ((op >> 20) & 0x1f) == 0x08)
++    {
++        int nr = ((op >> 29) & 0x7) + 1;
++        _this->pending_size = nr * (CONFIG_ISS_VLEN / 8);
++    }
+ }
+ 
+ void AraVlsu::handle_insn_store(AraVlsu *_this, iss_insn_t *insn)
+ {
+     // A store instruction is starting, just store information about the first burst and let
+     // the FSM handle all the bursts.
+-    unsigned int sewb = _this->ara.iss.vector.sewb;
+-    unsigned int lmul = _this->ara.iss.vector.lmul;
++    // Use the vector configuration captured at enqueue time; the live one may
++    // already reflect a later vsetvl executed by the core.
++    PendingInsn *pending = _this->insns[_this->insn_first_waiting].insn;
++    unsigned int sewb = pending->vsewb;
++    unsigned int lmul = pending->vlmul;
+     _this->pending_velem = velem_get(&_this->ara.iss, insn->in_regs[1], 0, sewb, lmul);
+-    _this->pending_addr = _this->insns[_this->insn_first_waiting].insn->reg;
++    _this->pending_addr = pending->reg;
+     _this->pending_is_write = true;
+     int elem_size = insn->uim[1] >= 5 ? 1 << (insn->uim[1] - 4) : 1 << 0;
+-    _this->pending_size = (_this->ara.iss.csr.vl.value - _this->ara.iss.csr.vstart.value) * elem_size;
++    _this->pending_size = (pending->vl - pending->vstart) * elem_size;
++
++    // Whole-register loads/stores (vl<nr>r.v / vs<nr>r.v: unit-stride with
++    // lumop/sumop == 0x08) transfer nr full registers regardless of vl.
++    uint32_t op = insn->opcode;
++    if (((op & 0x7f) == 0x07 || (op & 0x7f) == 0x27) &&
++        ((op >> 26) & 0x3) == 0 && ((op >> 20) & 0x1f) == 0x08)
++    {
++        int nr = ((op >> 29) & 0x7) + 1;
++        _this->pending_size = nr * (CONFIG_ISS_VLEN / 8);
++    }
+ }
+ 
+ void AraVlsu::data_grant(vp::Block *__this, vp::IoReq *req)
+diff --git a/models/cpu/iss/src/ara/spatz_vlsu.cpp b/models/cpu/iss/src/ara/spatz_vlsu.cpp
+index c7aa759..c184b87 100644
+--- a/models/cpu/iss/src/ara/spatz_vlsu.cpp
++++ b/models/cpu/iss/src/ara/spatz_vlsu.cpp
+@@ -179,15 +179,28 @@ void AraVlsu::handle_access(iss_insn_t *insn, bool is_write, int reg, bool do_st
+ {
+     // A load or store instruction is starting, just store information about the first burst and let
+     // the FSM handle all the bursts.
+-    unsigned int sewb = this->ara.iss.vector.sewb;
+-    unsigned int lmul = this->ara.iss.vector.lmul;
++    // Use the vector configuration captured at enqueue time; the live one may
++    // already reflect a later vsetvl executed by the core.
++    PendingInsn *pending = this->insns[this->insn_first_waiting].insn;
++    unsigned int sewb = pending->vsewb;
++    unsigned int lmul = pending->vlmul;
+     this->pending_vreg = reg;
+     this->pending_velem = velem_get(&this->ara.iss, reg, 0, sewb, lmul);
+-    this->pending_addr = this->insns[this->insn_first_waiting].insn->reg;
++    this->pending_addr = pending->reg;
+     this->pending_is_write = is_write;
+     int inst_elem_size = insn->uim[1] >= 5 ? 1 << (insn->uim[1] - 4) : 1 << 0;
+     int elem_size = reg_indexed != -1 ? sewb : inst_elem_size;
+-    this->pending_size = (this->ara.iss.csr.vl.value - this->ara.iss.csr.vstart.value) * elem_size;
++    this->pending_size = (pending->vl - pending->vstart) * elem_size;
++
++    // Whole-register loads/stores (vl<nr>r.v / vs<nr>r.v: unit-stride with
++    // lumop/sumop == 0x08) transfer nr full registers regardless of vl.
++    uint32_t op = insn->opcode;
++    if (((op & 0x7f) == 0x07 || (op & 0x7f) == 0x27) &&
++        ((op >> 26) & 0x3) == 0 && ((op >> 20) & 0x1f) == 0x08)
++    {
++        int nr = ((op >> 29) & 0x7) + 1;
++        this->pending_size = nr * (CONFIG_ISS_VLEN / 8);
++    }
+     this->stride = stride;
+     this->strided = do_stride;
+     this->elem_size = elem_size;
+@@ -265,6 +278,11 @@ void AraVlsu::fsm_handler(vp::Block *__this, vp::ClockEvent *event)
+                 else
+                 {
+                     size = std::min((iss_addr_t)_this->width, _this->pending_size);
++                    // Don't let a burst cross the interleave boundary: the TCDM
++                    // interconnect routes each request to a single bank, so a
++                    // misaligned full-width burst would spill past the bank.
++                    uint64_t boundary = _this->width - (_this->pending_addr & (_this->width - 1));
++                    size = std::min(size, boundary);
+                 }
+ 
+                 _this->trace.msg(vp::Trace::LEVEL_TRACE,
+diff --git a/models/cpu/iss/src/snitch_fast/sequencer.cpp b/models/cpu/iss/src/snitch_fast/sequencer.cpp
+index 67f6fc7..0481ff7 100644
+--- a/models/cpu/iss/src/snitch_fast/sequencer.cpp
++++ b/models/cpu/iss/src/snitch_fast/sequencer.cpp
+@@ -241,6 +241,30 @@ void Sequencer::fsm_handler(vp::Block *block, vp::ClockEvent *event)
+         {
+             iss_insn_t *insn = _this->buffer[_this->insn_count];
+ 
++            // Don't execute while an input register has a pending write from
++            // the vector unit (e.g. vfmv.f.s / vmv.x.s); retry next cycle.
++            bool input_pending = false;
++            for (int i=0; i<insn->nb_in_reg; i++)
++            {
++                if (insn->in_regs_fp[i])
++                {
++                    if (_this->scoreboard_freg_timestamp[insn->in_regs[i]] > _this->iss.top.clock.get_cycles())
++                    {
++                        input_pending = true;
++                        break;
++                    }
++                }
++                else if (_this->iss.regfile.scoreboard_reg_timestamp[insn->in_regs[i]] == -1)
++                {
++                    input_pending = true;
++                    break;
++                }
++            }
++            if (input_pending)
++            {
++                return;
++            }
++
+             _this->trace.msg(vp::Trace::LEVEL_TRACE, "Executing instruction from sequence buffer (pc: 0x%lx)\n", insn->addr);
+             bool force_trace_dump = _this->iss.trace.force_trace_dump;
+             _this->iss.trace.force_trace_dump = true;
