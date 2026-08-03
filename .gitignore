@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Fetched dependencies — re-created by setup.sh at pinned commits.
+# deps/patches/ holds our local changes to them and IS tracked.
+/deps/*
+!/deps/patches/
+/toolchains/
+
+# Per-op build + simulation artifacts (generated C, objects, ELFs, traces)
+/work/
+
+# Local harness settings
+.claude/settings.local.json
