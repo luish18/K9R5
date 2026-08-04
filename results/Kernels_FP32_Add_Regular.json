@@ -1,18 +1,53 @@
 {
   "op": "Kernels_FP32_Add_Regular",
+  "memory": "real",
   "results": [
     {
       "core": "cva6",
+      "target": "cva6_real",
       "status": "ok",
-      "cycles": 715,
+      "cycles": 863,
       "instret": null,
       "errors": 0,
       "outputs": 64,
       "maxdiff": 0.0,
-      "sim_wall_s": 0.2
+      "sim_wall_s": 0.2,
+      "caches": [
+        {
+          "cache": "icache",
+          "accesses": 281,
+          "reads": 281,
+          "writes": 0,
+          "hits": 244,
+          "misses": 37,
+          "hit_rate": 0.8683,
+          "latency_cycles": 4206
+        },
+        {
+          "cache": "dcache",
+          "accesses": 721,
+          "reads": 415,
+          "writes": 306,
+          "hits": 465,
+          "misses": 256,
+          "hit_rate": 0.6449,
+          "latency_cycles": 5747
+        },
+        {
+          "cache": "l2",
+          "accesses": 378,
+          "reads": 72,
+          "writes": 306,
+          "hits": 296,
+          "misses": 82,
+          "hit_rate": 0.7831,
+          "latency_cycles": 20623
+        }
+      ]
     },
     {
       "core": "snitch",
+      "target": "snitch_real",
       "status": "ok",
       "cycles": 1053,
       "instret": null,
@@ -23,8 +58,9 @@
     },
     {
       "core": "spatz",
+      "target": "spatz_real",
       "status": "ok",
-      "cycles": 635,
+      "cycles": 1035,
       "instret": null,
       "errors": 0,
       "outputs": 64,

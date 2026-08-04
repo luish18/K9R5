@@ -1,0 +1,39 @@
+{
+  "op": "Kernels_FP32_Add_Regular",
+  "memory": "ideal",
+  "results": [
+    {
+      "core": "cva6",
+      "target": "cva6_ideal",
+      "status": "ok",
+      "cycles": 715,
+      "instret": null,
+      "errors": 0,
+      "outputs": 64,
+      "maxdiff": 0.0,
+      "sim_wall_s": 0.2
+    },
+    {
+      "core": "snitch",
+      "target": "snitch",
+      "status": "ok",
+      "cycles": 1053,
+      "instret": null,
+      "errors": 0,
+      "outputs": 64,
+      "maxdiff": 0.0,
+      "sim_wall_s": 0.9
+    },
+    {
+      "core": "spatz",
+      "target": "spatz",
+      "status": "ok",
+      "cycles": 635,
+      "instret": null,
+      "errors": 0,
+      "outputs": 64,
+      "maxdiff": 0.0,
+      "sim_wall_s": 0.9
+    }
+  ]
+}

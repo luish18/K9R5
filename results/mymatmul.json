@@ -1,30 +1,66 @@
 {
   "op": "mymatmul",
+  "memory": "real",
   "results": [
     {
       "core": "cva6",
+      "target": "cva6_real",
       "status": "ok",
-      "cycles": 469273,
+      "cycles": 477472,
       "instret": null,
       "errors": 0,
       "outputs": 1024,
       "maxdiff": 0.0,
-      "sim_wall_s": 0.2
+      "sim_wall_s": 0.2,
+      "caches": [
+        {
+          "cache": "icache",
+          "accesses": 69888,
+          "reads": 69888,
+          "writes": 0,
+          "hits": 69852,
+          "misses": 36,
+          "hit_rate": 0.9995,
+          "latency_cycles": 4073
+        },
+        {
+          "cache": "dcache",
+          "accesses": 69884,
+          "reads": 68175,
+          "writes": 1709,
+          "hits": 67926,
+          "misses": 1958,
+          "hit_rate": 0.972,
+          "latency_cycles": 131565
+        },
+        {
+          "cache": "l2",
+          "accesses": 2075,
+          "reads": 366,
+          "writes": 1709,
+          "hits": 1699,
+          "misses": 376,
+          "hit_rate": 0.8188,
+          "latency_cycles": 66023
+        }
+      ]
     },
     {
       "core": "snitch",
+      "target": "snitch_real",
       "status": "ok",
       "cycles": 206037,
       "instret": null,
       "errors": 0,
       "outputs": 1024,
       "maxdiff": 0.0,
-      "sim_wall_s": 1.1
+      "sim_wall_s": 1.0
     },
     {
       "core": "spatz",
+      "target": "spatz_real",
       "status": "ok",
-      "cycles": 56736,
+      "cycles": 57636,
       "instret": null,
       "errors": 0,
       "outputs": 1024,

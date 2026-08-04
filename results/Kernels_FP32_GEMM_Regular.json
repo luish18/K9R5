@@ -1,30 +1,66 @@
 {
   "op": "Kernels_FP32_GEMM_Regular",
+  "memory": "real",
   "results": [
     {
       "core": "cva6",
+      "target": "cva6_real",
       "status": "ok",
-      "cycles": 473324,
+      "cycles": 488955,
       "instret": null,
       "errors": 0,
       "outputs": 1024,
       "maxdiff": 3e-06,
-      "sim_wall_s": 0.3
+      "sim_wall_s": 0.2,
+      "caches": [
+        {
+          "cache": "icache",
+          "accesses": 7400,
+          "reads": 7400,
+          "writes": 0,
+          "hits": 7359,
+          "misses": 41,
+          "hit_rate": 0.9945,
+          "latency_cycles": 4636
+        },
+        {
+          "cache": "dcache",
+          "accesses": 70911,
+          "reads": 69200,
+          "writes": 1711,
+          "hits": 68889,
+          "misses": 2022,
+          "hit_rate": 0.9715,
+          "latency_cycles": 138741
+        },
+        {
+          "cache": "l2",
+          "accesses": 2146,
+          "reads": 435,
+          "writes": 1711,
+          "hits": 1701,
+          "misses": 445,
+          "hit_rate": 0.7926,
+          "latency_cycles": 71679
+        }
+      ]
     },
     {
       "core": "snitch",
+      "target": "snitch_real",
       "status": "ok",
       "cycles": 213628,
       "instret": null,
       "errors": 0,
       "outputs": 1024,
       "maxdiff": 3e-06,
-      "sim_wall_s": 1.4
+      "sim_wall_s": 1.1
     },
     {
       "core": "spatz",
+      "target": "spatz_real",
       "status": "ok",
-      "cycles": 59804,
+      "cycles": 60904,
       "instret": null,
       "errors": 0,
       "outputs": 1024,

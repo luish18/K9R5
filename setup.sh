@@ -18,6 +18,10 @@ TOOLCHAIN_VERSION=15.2.0-1
 TOOLCHAIN_DIR="toolchains/xpack-riscv-none-elf-gcc-${TOOLCHAIN_VERSION}"
 TOOLCHAIN_URL="https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/download/v${TOOLCHAIN_VERSION}/xpack-riscv-none-elf-gcc-${TOOLCHAIN_VERSION}-linux-x64.tar.gz"
 
+# GVSoC targets to build: the three stock ones (--memory ideal) and the three
+# in targets/ that model the memory system (--memory real, the default).
+TARGETS="cva6 snitch spatz cva6_real snitch_real spatz_real"
+
 log() { printf '\n=== %s\n' "$1"; }
 
 command -v uv >/dev/null || {
@@ -51,14 +55,16 @@ else
   git -C deps/gvsoc submodule update --init --recursive -j8
 fi
 
-log "GVSoC vector-model patch"
-PATCH="$ROOT/deps/patches/gvsoc-core-rvv-extensions-and-fixes.patch"
-if git -C deps/gvsoc/core apply --reverse --check "$PATCH" 2>/dev/null; then
-  echo "already applied"
-else
-  git -C deps/gvsoc/core apply "$PATCH"
-  echo "applied"
-fi
+log "GVSoC model patches"
+for patch in "$ROOT"/deps/patches/gvsoc-core-*.patch; do
+  name="$(basename "$patch")"
+  if git -C deps/gvsoc/core apply --reverse --check "$patch" 2>/dev/null; then
+    echo "already applied: $name"
+  else
+    git -C deps/gvsoc/core apply "$patch"
+    echo "applied: $name"
+  fi
+done
 
 log "Python environment"
 [ -d .venv ] || uv venv --python 3.11 .venv
@@ -69,10 +75,12 @@ uv pip install -p .venv \
   -r deps/gvsoc/gapy/requirements.txt \
   ninja
 
-log "Building GVSoC (cva6, snitch, spatz) — this takes a few minutes"
+log "Building GVSoC (6 targets) — this takes a few minutes"
 # The build drives gapy from the venv, so run it with the venv activated.
+# MODULES adds targets/ to the module roots, which is what lets the build see
+# the *_real targets and compile the timing-cache model that lives with them.
 ( cd deps/gvsoc && . "$ROOT/.venv/bin/activate" \
-  && make all TARGETS="cva6 snitch spatz" CMAKE_FLAGS="-j $(nproc)" )
+  && make all TARGETS="$TARGETS" MODULES="$ROOT/targets" CMAKE_FLAGS="-j $(nproc)" )
 
 log "Done. Try:"
 echo "  .venv/bin/python pipeline/run.py Tests/Kernels/FP32/GEMM/Regular"
