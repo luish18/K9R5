@@ -5,6 +5,8 @@ Usage:
   python pipeline/run.py Tests/Kernels/FP32/GEMM/Regular            # Deeploy test name
   python pipeline/run.py /path/to/dir                               # dir with network.onnx + inputs.npz + outputs.npz
   python pipeline/run.py <op> --cores cva6,snitch,spatz
+  python pipeline/run.py <op> --debug                               # trace every command and the files it produced
+                                                                    # (same as HES_DEBUG=1; trace goes to stderr)
 
 Each simulated core type:
   cva6   : rv64gc host core, ideal zero-latency memory        (target cva6_ideal)
@@ -14,7 +16,9 @@ Each simulated core type:
 
 import argparse
 import json
+import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -81,9 +85,96 @@ COMMON_FLAGS = ["-mcmodel=medany", "-nostdlib", "-nostartfiles", "-ffunction-sec
 LINK_LIBS = ["-Wl,--gc-sections", "-Wl,--allow-multiple-definition", "-lc", "-lm", "-lgcc"]
 
 
-def sh(cmd, cwd=None, timeout=None, env=None):
-    return subprocess.run(cmd, cwd=cwd, timeout=timeout, env=env,
-                          capture_output=True, text=True)
+DEBUG = False
+
+
+def rel(p) -> str:
+    """Path relative to the repo root when it is inside it, else absolute."""
+    p = Path(p)
+    for cand in (p, p.resolve()):
+        try:
+            return str(cand.relative_to(ROOT))
+        except ValueError:
+            pass
+    return str(p)
+
+
+def human_size(n: int) -> str:
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if n < 1024 or unit == "GiB":
+            return f"{n} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+
+
+def dbg(msg: str) -> None:
+    """One line of --debug trace, on stderr so stdout stays the report."""
+    if DEBUG:
+        print(f"[dbg] {msg}", file=sys.stderr, flush=True)
+
+
+def note_file(path: Path, why: str) -> None:
+    """Trace a file written by the driver itself rather than by a command."""
+    if DEBUG:
+        size = human_size(path.stat().st_size) if path.is_file() else "not created"
+        dbg(f"  {rel(path)}  ({size}, {why})")
+
+
+def snapshot(paths) -> dict:
+    """Files under each directory in `paths`, with mtimes, before a command runs."""
+    seen = {}
+    for p in paths:
+        p = Path(p)
+        seen[p] = ({f: f.stat().st_mtime_ns for f in p.rglob("*") if f.is_file()}
+                   if p.is_dir() else {})
+    return seen
+
+
+def report_produced(produces, before: dict) -> None:
+    """Trace what a command generated: named files, plus files new or rewritten
+    in the directories it writes into (so a re-run still lists its outputs)."""
+    if not DEBUG:
+        return
+    for p in produces:
+        p = Path(p)
+        if p.is_dir():
+            old = before.get(p, {})
+            touched = sorted(f for f in p.rglob("*")
+                             if f.is_file() and f.stat().st_mtime_ns != old.get(f))
+            for f in touched:
+                dbg(f"  -> {rel(f)}  ({human_size(f.stat().st_size)})")
+            if not touched:
+                dbg(f"  -> {rel(p)}/  (nothing written)")
+        elif p.is_file():
+            dbg(f"  -> {rel(p)}  ({human_size(p.stat().st_size)})")
+        else:
+            dbg(f"  -> {rel(p)}  (not created)")
+
+
+def sh(cmd, cwd=None, timeout=None, env=None, produces=()):
+    """Run a command, capturing its output.
+
+    `produces` names the files (or directories) the command is expected to
+    generate; with --debug the command line and those files are traced.
+    """
+    before = {}
+    if DEBUG:
+        before = snapshot(produces)
+        dbg(f"$ {shlex.join(str(c) for c in cmd)}")
+        if cwd:
+            dbg(f"  (cwd: {rel(cwd)})")
+
+    t0 = time.time()
+    try:
+        r = subprocess.run(cmd, cwd=cwd, timeout=timeout, env=env,
+                           capture_output=True, text=True)
+    except subprocess.TimeoutExpired:
+        dbg(f"  timed out after {timeout}s")
+        report_produced(produces, before)
+        raise
+
+    dbg(f"  exit={r.returncode} in {time.time() - t0:.1f}s")
+    report_produced(produces, before)
+    return r
 
 
 def resolve_test_dir(op: str) -> Path:
@@ -97,7 +188,8 @@ def resolve_test_dir(op: str) -> Path:
 def generate_c(test_dir: Path, gen_dir: Path) -> None:
     gen_dir.mkdir(parents=True, exist_ok=True)
     r = sh([str(PYTHON), "generateNetwork.py", "-t", str(test_dir),
-            "-p", "Generic", "-d", str(gen_dir)], cwd=DEEPLOY_TEST)
+            "-p", "Generic", "-d", str(gen_dir)], cwd=DEEPLOY_TEST,
+           produces=[gen_dir])
     if r.returncode != 0:
         sys.exit(f"Deeploy codegen failed:\n{r.stdout}\n{r.stderr}")
 
@@ -115,7 +207,8 @@ def build(core: Core, gen_dir: Path, out_dir: Path) -> Path:
         for src in srcs:
             obj = out_dir / f"{tag}_{Path(src).stem}.o"
             r = sh([str(TC), *arch, *COMMON_FLAGS, *flags, *incs,
-                    f"-DCORE_NAME=\"{core.name}\"", "-c", str(src), "-o", str(obj)])
+                    f"-DCORE_NAME=\"{core.name}\"", "-c", str(src), "-o", str(obj)],
+                   produces=[obj])
             if r.returncode != 0:
                 sys.exit(f"[{core.name}] compile failed for {src}:\n{r.stderr}")
             objs.append(obj)
@@ -130,7 +223,8 @@ def build(core: Core, gen_dir: Path, out_dir: Path) -> Path:
     compile_(kernels, core.kernel_flags, "k")
 
     r = sh([str(TC), *arch, *COMMON_FLAGS, f"-T{core.linker}",
-            *[str(o) for o in objs], *LINK_LIBS, "-o", str(elf)])
+            *[str(o) for o in objs], *LINK_LIBS, "-o", str(elf)],
+           produces=[elf])
     if r.returncode != 0:
         sys.exit(f"[{core.name}] link failed:\n{r.stderr}")
     return elf
@@ -143,19 +237,20 @@ def simulate(core: Core, elf: Path, run_dir: Path, timeout_s: int):
         cmd += [f"--target-dir={core.target_dir}"]
     cmd += [f"--target={core.target}", f"--binary={elf}", "run"]
 
-    import os
     env = dict(os.environ)
     env["PATH"] = f"{ROOT / '.venv' / 'bin'}:{env['PATH']}"
 
     t0 = time.time()
     try:
-        r = sh(cmd, cwd=run_dir, timeout=timeout_s, env=env)
+        r = sh(cmd, cwd=run_dir, timeout=timeout_s, env=env, produces=[run_dir])
     except subprocess.TimeoutExpired:
         return {"core": core.name, "status": "timeout"}
     wall = time.time() - t0
 
     out = r.stdout + r.stderr
-    (run_dir / "sim.log").write_text(out)
+    log = run_dir / "sim.log"
+    log.write_text(out)
+    note_file(log, "simulator stdout+stderr")
 
     m = re.search(r"\[HES\] core=(\S+) cycles=(\d+) instret=(\d+) errors=(\d+) "
                   r"total=(\d+) maxdiff_e6=(\d+)", out)
@@ -195,6 +290,7 @@ def report(op_name: str, results: list[dict]) -> None:
     RESULTS.mkdir(exist_ok=True)
     out = RESULTS / f"{op_name.replace('/', '_')}.json"
     out.write_text(json.dumps({"op": op_name, "results": results}, indent=2))
+    note_file(out, "per-core metrics")
     print(f"results written to {out.relative_to(ROOT)}")
 
 
@@ -204,7 +300,12 @@ def main():
     ap.add_argument("op", help="Deeploy test dir (network.onnx + inputs.npz + outputs.npz)")
     ap.add_argument("--cores", default="cva6,snitch,spatz")
     ap.add_argument("--timeout", type=int, default=600, help="per-sim timeout [s]")
+    ap.add_argument("-d", "--debug", action="store_true",
+                    help="trace every command run and the files it generated (on stderr)")
     args = ap.parse_args()
+
+    global DEBUG
+    DEBUG = args.debug or os.environ.get("HES_DEBUG", "") not in ("", "0")
 
     test_dir = resolve_test_dir(args.op)
     op_name = test_dir.name if test_dir.name != "." else "op"
