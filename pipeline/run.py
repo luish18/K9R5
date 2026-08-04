@@ -5,13 +5,20 @@ Usage:
   python pipeline/run.py Tests/Kernels/FP32/GEMM/Regular            # Deeploy test name
   python pipeline/run.py /path/to/dir                               # dir with network.onnx + inputs.npz + outputs.npz
   python pipeline/run.py <op> --cores cva6,snitch,spatz
+  python pipeline/run.py <op> --memory ideal                        # zero-latency memory instead of the modelled one
   python pipeline/run.py <op> --debug                               # trace every command and the files it produced
                                                                     # (same as HES_DEBUG=1; trace goes to stderr)
 
 Each simulated core type:
-  cva6   : rv64gc host core, ideal zero-latency memory        (target cva6_ideal)
-  snitch : rv32imafd Snitch core, data in single-cycle TCDM   (target snitch)
-  spatz  : Snitch + Spatz VPU, RVV kernels, data in TCDM      (target spatz)
+  cva6   : rv64gc host core, L1 I$/D$ + L2 + DRAM             (target cva6_real)
+  snitch : rv32imafd Snitch core, data in cluster TCDM        (target snitch_real)
+  spatz  : Snitch + Spatz VPU, RVV kernels, data in TCDM      (target spatz_real)
+
+--memory selects how main memory is simulated. `real` (the default) runs the
+targets above, which model cache misses, DRAM latency and refill bandwidth.
+`ideal` runs the zero-latency targets the first version of the pipeline used
+(cva6_ideal, snitch, spatz), where every access completes in a single cycle and
+cycle counts measure compute alone.
 """
 
 import argparse
@@ -33,6 +40,7 @@ GVSOC = ROOT / "deps" / "gvsoc" / "install" / "bin" / "gvsoc"
 TC = ROOT / "toolchains" / "xpack-riscv-none-elf-gcc-15.2.0-1" / "bin" / "riscv-none-elf-gcc"
 PYTHON = ROOT / ".venv" / "bin" / "python"
 RUNTIME = ROOT / "runtime"
+TARGETS = ROOT / "targets"
 WORK = ROOT / "work"
 RESULTS = ROOT / "results"
 
@@ -40,19 +48,31 @@ RESULTS = ROOT / "results"
 @dataclass
 class Core:
     name: str
-    target: str
     march: str
     mabi: str
     linker: Path
-    target_dir: Path | None = None
+    # GVSoC target per memory model, keyed as in MEMORY_MODELS.
+    targets: dict[str, str]
     kernel_flags: list[str] = field(default_factory=list)
+
+    def target(self, memory: str) -> str:
+        return self.targets[memory]
+
+
+# How main memory is simulated. `real` uses the targets in targets/, which
+# model the memory system; `ideal` uses zero-latency memory, where a cycle
+# count is a pure compute cost.
+MEMORY_MODELS = {
+    "real": "modelled memory system",
+    "ideal": "ideal memory / infinite cache",
+}
+DEFAULT_MEMORY = "real"
 
 
 CORES = {
     "cva6": Core(
         name="cva6",
-        target="cva6_ideal",
-        target_dir=ROOT / "targets",
+        targets={"real": "cva6_real", "ideal": "cva6_ideal"},
         march="rv64imafdc_zicsr_zifencei",
         mabi="lp64d",
         linker=RUNTIME / "common" / "link.ld",
@@ -60,7 +80,7 @@ CORES = {
     ),
     "snitch": Core(
         name="snitch",
-        target="snitch",
+        targets={"real": "snitch_real", "ideal": "snitch"},
         march="rv32imafd_zicsr_zifencei",
         mabi="ilp32d",
         linker=RUNTIME / "snitch" / "link.ld",
@@ -68,7 +88,7 @@ CORES = {
     ),
     "spatz": Core(
         name="spatz",
-        target="spatz",
+        targets={"real": "spatz_real", "ideal": "spatz"},
         march="rv32imafd_zicsr_zifencei_v",
         mabi="ilp32d",
         linker=RUNTIME / "spatz" / "link.ld",
@@ -230,12 +250,31 @@ def build(core: Core, gen_dir: Path, out_dir: Path) -> Path:
     return elf
 
 
-def simulate(core: Core, elf: Path, run_dir: Path, timeout_s: int):
+def parse_caches(out: str) -> list[dict]:
+    """Per-cache counters, printed by the timing caches at the end of a run."""
+    caches = []
+    for m in re.finditer(r"\[HES-MEM\] cache=(\S+) accesses=(\d+) reads=(\d+) writes=(\d+) "
+                         r"hits=(\d+) misses=(\d+) latency_cycles=(\d+)", out):
+        # Hits and misses are counted per line looked up, so an access that
+        # straddles two lines contributes two of them.
+        lookups = int(m.group(5)) + int(m.group(6))
+        caches.append({
+            "cache": m.group(1).split("/")[-1],
+            "accesses": int(m.group(2)),
+            "reads": int(m.group(3)),
+            "writes": int(m.group(4)),
+            "hits": int(m.group(5)),
+            "misses": int(m.group(6)),
+            "hit_rate": round(int(m.group(5)) / lookups, 4) if lookups else None,
+            "latency_cycles": int(m.group(7)),
+        })
+    return caches
+
+
+def simulate(core: Core, memory: str, elf: Path, run_dir: Path, timeout_s: int):
     run_dir.mkdir(parents=True, exist_ok=True)
-    cmd = [str(GVSOC)]
-    if core.target_dir:
-        cmd += [f"--target-dir={core.target_dir}"]
-    cmd += [f"--target={core.target}", f"--binary={elf}", "run"]
+    cmd = [str(GVSOC), f"--target-dir={TARGETS}",
+           f"--target={core.target(memory)}", f"--binary={elf}", "run"]
 
     env = dict(os.environ)
     env["PATH"] = f"{ROOT / '.venv' / 'bin'}:{env['PATH']}"
@@ -258,8 +297,9 @@ def simulate(core: Core, elf: Path, run_dir: Path, timeout_s: int):
         return {"core": core.name, "status": "no-metrics",
                 "log_tail": out.strip().splitlines()[-6:]}
 
-    return {
+    result = {
         "core": core.name,
+        "target": core.target(memory),
         "status": "ok" if m.group(4) == "0" else "wrong-result",
         "cycles": int(m.group(2)),
         "instret": int(m.group(3)) or None,
@@ -268,13 +308,17 @@ def simulate(core: Core, elf: Path, run_dir: Path, timeout_s: int):
         "maxdiff": int(m.group(6)) / 1e6,
         "sim_wall_s": round(wall, 1),
     }
+    caches = parse_caches(out)
+    if caches:
+        result["caches"] = caches
+    return result
 
 
-def report(op_name: str, results: list[dict]) -> None:
+def report(op_name: str, memory: str, results: list[dict]) -> None:
     ok = {r["core"]: r for r in results if "cycles" in r}
     base = ok.get("cva6")
 
-    print(f"\n=== {op_name} — per-core performance (ideal memory / infinite cache) ===\n")
+    print(f"\n=== {op_name} — per-core performance ({MEMORY_MODELS[memory]}) ===\n")
     hdr = f"{'core':8} {'status':13} {'cycles':>12} {'instret':>10} {'speedup':>9}  {'maxdiff':>10}"
     print(hdr)
     print("-" * len(hdr))
@@ -287,9 +331,25 @@ def report(op_name: str, results: list[dict]) -> None:
               f"{r.get('maxdiff', '-'):>10}")
     print()
 
+    if any(r.get("caches") for r in results):
+        # The caches count the whole program — startup, the timed op, and the
+        # output check — while `cycles` above covers the timed op alone.
+        print("cache counters (whole run, not only the timed op):\n")
+        hdr = (f"{'core':8} {'cache':8} {'accesses':>10} {'misses':>9} "
+               f"{'hit rate':>9} {'latency':>10}")
+        print(hdr)
+        print("-" * len(hdr))
+        for r in results:
+            for c in r.get("caches", []):
+                rate = f"{100 * c['hit_rate']:.2f}%" if c["hit_rate"] is not None else "-"
+                print(f"{r['core']:8} {c['cache']:8} {c['accesses']:>10} {c['misses']:>9} "
+                      f"{rate:>9} {c['latency_cycles']:>10}")
+        print()
+
     RESULTS.mkdir(exist_ok=True)
-    out = RESULTS / f"{op_name.replace('/', '_')}.json"
-    out.write_text(json.dumps({"op": op_name, "results": results}, indent=2))
+    suffix = "" if memory == DEFAULT_MEMORY else f"-{memory}"
+    out = RESULTS / f"{op_name.replace('/', '_')}{suffix}.json"
+    out.write_text(json.dumps({"op": op_name, "memory": memory, "results": results}, indent=2))
     note_file(out, "per-core metrics")
     print(f"results written to {out.relative_to(ROOT)}")
 
@@ -299,6 +359,8 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("op", help="Deeploy test dir (network.onnx + inputs.npz + outputs.npz)")
     ap.add_argument("--cores", default="cva6,snitch,spatz")
+    ap.add_argument("--memory", choices=list(MEMORY_MODELS), default=DEFAULT_MEMORY,
+                    help="how main memory is simulated (default: %(default)s)")
     ap.add_argument("--timeout", type=int, default=600, help="per-sim timeout [s]")
     ap.add_argument("-d", "--debug", action="store_true",
                     help="trace every command run and the files it generated (on stderr)")
@@ -327,9 +389,12 @@ def main():
         print(f"[2/3] build + [3/3] simulate: {cname} "
               f"({i + 1}/{len(cores)})", flush=True)
         elf = build(core, gen_dir, work / cname)
-        results.append(simulate(core, elf, work / cname / "run", args.timeout))
+        # The binary does not depend on the memory model, only the target does,
+        # so runs of the two models keep their logs side by side.
+        results.append(simulate(core, args.memory, elf,
+                                work / cname / f"run-{args.memory}", args.timeout))
 
-    report(op_name, results)
+    report(op_name, args.memory, results)
 
 
 if __name__ == "__main__":

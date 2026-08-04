@@ -1,0 +1,39 @@
+{
+  "op": "Kernels_FP32_Softmax_Regular",
+  "memory": "ideal",
+  "results": [
+    {
+      "core": "cva6",
+      "target": "cva6_ideal",
+      "status": "ok",
+      "cycles": 34112,
+      "instret": null,
+      "errors": 0,
+      "outputs": 512,
+      "maxdiff": 0.0,
+      "sim_wall_s": 0.2
+    },
+    {
+      "core": "snitch",
+      "target": "snitch",
+      "status": "ok",
+      "cycles": 51009,
+      "instret": null,
+      "errors": 0,
+      "outputs": 512,
+      "maxdiff": 0.0,
+      "sim_wall_s": 0.9
+    },
+    {
+      "core": "spatz",
+      "target": "spatz",
+      "status": "ok",
+      "cycles": 30426,
+      "instret": null,
+      "errors": 0,
+      "outputs": 512,
+      "maxdiff": 0.0,
+      "sim_wall_s": 0.9
+    }
+  ]
+}

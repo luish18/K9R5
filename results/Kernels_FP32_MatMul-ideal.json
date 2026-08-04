@@ -1,0 +1,39 @@
+{
+  "op": "Kernels_FP32_MatMul",
+  "memory": "ideal",
+  "results": [
+    {
+      "core": "cva6",
+      "target": "cva6_ideal",
+      "status": "ok",
+      "cycles": 117577,
+      "instret": null,
+      "errors": 0,
+      "outputs": 256,
+      "maxdiff": 0.0,
+      "sim_wall_s": 0.2
+    },
+    {
+      "core": "snitch",
+      "target": "snitch",
+      "status": "ok",
+      "cycles": 52709,
+      "instret": null,
+      "errors": 0,
+      "outputs": 256,
+      "maxdiff": 0.0,
+      "sim_wall_s": 0.9
+    },
+    {
+      "core": "spatz",
+      "target": "spatz",
+      "status": "ok",
+      "cycles": 14589,
+      "instret": null,
+      "errors": 0,
+      "outputs": 256,
+      "maxdiff": 2e-06,
+      "sim_wall_s": 0.9
+    }
+  ]
+}

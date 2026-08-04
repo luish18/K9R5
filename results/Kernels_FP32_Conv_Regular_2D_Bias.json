@@ -1,18 +1,53 @@
 {
   "op": "Kernels_FP32_Conv_Regular_2D_Bias",
+  "memory": "real",
   "results": [
     {
       "core": "cva6",
+      "target": "cva6_real",
       "status": "ok",
-      "cycles": 1740542,
+      "cycles": 1860399,
       "instret": null,
       "errors": 0,
       "outputs": 840,
       "maxdiff": 0.0,
-      "sim_wall_s": 0.3
+      "sim_wall_s": 0.3,
+      "caches": [
+        {
+          "cache": "icache",
+          "accesses": 40752,
+          "reads": 40752,
+          "writes": 0,
+          "hits": 40696,
+          "misses": 56,
+          "hit_rate": 0.9986,
+          "latency_cycles": 6318
+        },
+        {
+          "cache": "dcache",
+          "accesses": 271674,
+          "reads": 243096,
+          "writes": 28578,
+          "hits": 249113,
+          "misses": 22561,
+          "hit_rate": 0.917,
+          "latency_cycles": 432526
+        },
+        {
+          "cache": "l2",
+          "accesses": 29585,
+          "reads": 1007,
+          "writes": 28578,
+          "hits": 28574,
+          "misses": 1011,
+          "hit_rate": 0.9658,
+          "latency_cycles": 583794
+        }
+      ]
     },
     {
       "core": "snitch",
+      "target": "snitch_real",
       "status": "ok",
       "cycles": 1136119,
       "instret": null,
@@ -23,8 +58,9 @@
     },
     {
       "core": "spatz",
+      "target": "spatz_real",
       "status": "ok",
-      "cycles": 452279,
+      "cycles": 456979,
       "instret": null,
       "errors": 0,
       "outputs": 840,

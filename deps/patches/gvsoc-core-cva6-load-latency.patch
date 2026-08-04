@@ -1,0 +1,34 @@
+diff --git a/models/cpu/iss/src/cva6/cva6.cpp b/models/cpu/iss/src/cva6/cva6.cpp
+index 8a17739..214baf3 100644
+--- a/models/cpu/iss/src/cva6/cva6.cpp
++++ b/models/cpu/iss/src/cva6/cva6.cpp
+@@ -159,15 +159,23 @@ void IssWrapper::fsm_handler(vp::Block *__this, vp::ClockEvent *event)
+         {
+             iss_addr_t next_pc = insn->stub_handler(&_this->iss, insn, pending_insn.pc);
+ 
++            int64_t committed = _this->clock.get_cycles();
++
+             for (int i=0; i<insn->nb_out_reg; i++)
+             {
+-                if (!insn->out_regs_fp[i])
+-                {
+-                    _this->iss.regfile.scoreboard_reg_timestamp[insn->out_regs[i]] = _this->clock.get_cycles();
+-                }
+-                else
++                // The handler executed just above may have scheduled a destination
++                // register for later than this cycle: a load gets its data when the
++                // memory responds, and the LSU records that on the scoreboard. Marking
++                // the register ready at commit time regardless discarded the latency of
++                // every data access, so a dependent instruction never waited for memory.
++                // Keep whichever is later.
++                int64_t *timestamp = !insn->out_regs_fp[i]
++                    ? &_this->iss.regfile.scoreboard_reg_timestamp[insn->out_regs[i]]
++                    : &_this->iss.regfile.scoreboard_freg_timestamp[insn->out_regs[i]];
++
++                if (*timestamp < committed)
+                 {
+-                    _this->iss.regfile.scoreboard_freg_timestamp[insn->out_regs[i]] = _this->clock.get_cycles();
++                    *timestamp = committed;
+                 }
+             }
+ 

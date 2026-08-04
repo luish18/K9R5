@@ -1,18 +1,53 @@
 {
   "op": "Kernels_FP32_MatMul",
+  "memory": "real",
   "results": [
     {
       "core": "cva6",
+      "target": "cva6_real",
       "status": "ok",
-      "cycles": 117577,
+      "cycles": 119037,
       "instret": null,
       "errors": 0,
       "outputs": 256,
       "maxdiff": 0.0,
-      "sim_wall_s": 0.2
+      "sim_wall_s": 0.2,
+      "caches": [
+        {
+          "cache": "icache",
+          "accesses": 17819,
+          "reads": 17819,
+          "writes": 0,
+          "hits": 17778,
+          "misses": 41,
+          "hit_rate": 0.9977,
+          "latency_cycles": 4631
+        },
+        {
+          "cache": "dcache",
+          "accesses": 18973,
+          "reads": 17761,
+          "writes": 1212,
+          "hits": 17621,
+          "misses": 1352,
+          "hit_rate": 0.9287,
+          "latency_cycles": 76816
+        },
+        {
+          "cache": "l2",
+          "accesses": 1491,
+          "reads": 279,
+          "writes": 1212,
+          "hits": 1203,
+          "misses": 288,
+          "hit_rate": 0.8068,
+          "latency_cycles": 54746
+        }
+      ]
     },
     {
       "core": "snitch",
+      "target": "snitch_real",
       "status": "ok",
       "cycles": 52709,
       "instret": null,
@@ -23,8 +58,9 @@
     },
     {
       "core": "spatz",
+      "target": "spatz_real",
       "status": "ok",
-      "cycles": 14589,
+      "cycles": 15789,
       "instret": null,
       "errors": 0,
       "outputs": 256,
