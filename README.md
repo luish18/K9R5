@@ -46,6 +46,34 @@ Bring your own ONNX op (expected outputs computed with onnxruntime):
 Output: a per-core table (cycles, speedup vs CVA6, numerical error vs the ONNX
 reference) printed to stdout and saved as JSON in `results/`.
 
+### Debugging a run
+
+`--debug` (or `-d`, or `HES_DEBUG=1`, or `make run DEBUG=1`) traces every command
+the pipeline runs — Deeploy codegen, each compile, the link, GVSoC — followed by
+the files that command generated, so a failure can be reproduced by hand:
+
+```bash
+.venv/bin/python pipeline/run.py ops/mymatmul --debug
+```
+
+```
+[dbg] $ .venv/bin/python generateNetwork.py -t ops/mymatmul -p Generic -d work/mymatmul/gen
+[dbg]   (cwd: deps/deeploy/DeeployTest)
+[dbg]   exit=0 in 1.0s
+[dbg]   -> work/mymatmul/gen/Network.c  (25.0 KiB)
+[dbg]   -> work/mymatmul/gen/testinputs.h  (23.6 KiB)
+...
+[dbg] $ toolchains/.../riscv-none-elf-gcc -march=rv64imafdc_zicsr_zifencei ... -o work/mymatmul/cva6/net.elf
+[dbg]   exit=0 in 0.0s
+[dbg]   -> work/mymatmul/cva6/net.elf  (27.2 KiB)
+```
+
+The trace goes to stderr, so stdout still carries only the report:
+`run.py <op> --debug 2>trace.log`. Files the driver itself writes (`sim.log`,
+the results JSON) are traced too. Commands that produce nothing are shown as
+`(not created)`, which is what a failed compile or a timed-out simulation looks
+like.
+
 ## Layout
 
 ```
