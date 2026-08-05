@@ -9,8 +9,13 @@ ONNX op + inputs  ──Deeploy──►  C code  ──riscv-gcc──►  3 EL
 | core   | what is simulated                                    | GVSoC target | ISA               |
 |--------|------------------------------------------------------|--------------|-------------------|
 | cva6   | CVA6 64-bit host core, L1 I$/D$ + L2 + DRAM          | `cva6_real` (in `targets/`) | rv64imafdc |
-| snitch | Snitch cluster core, data in cluster TCDM            | `snitch_real` (in `targets/`) | rv32imafd |
+| snitch | Snitch integer core + FP subsystem, SSR streamers and FREP sequencer, data in cluster TCDM | `snitch_real` (in `targets/`) | rv32imafd + Xssr/Xfrep |
 | spatz  | Snitch + Spatz vector unit (4 lanes), RVV kernels    | `spatz_real` (in `targets/`) | rv32imafd + V |
+
+Each core runs the best code the pipeline can give it, not the same code: CVA6
+scalar `-O3`, Spatz autovectorized to RVV, Snitch's FP kernels hand-written
+against its two custom extensions — see
+[The Snitch FP extensions](#the-snitch-fp-extensions-xssr--xfrep).
 
 **The memory system is simulated,** not assumed away: cache misses, DRAM latency and
 refill bandwidth all land in the cycle counts. `--memory ideal` switches back to the
@@ -92,6 +97,9 @@ setup.sh               fetch + patch + build all dependencies (pinned commits)
 pipeline/run.py        the pipeline driver (codegen → build → simulate → report)
 pipeline/make_op.py    wrap an ONNX model + inputs into a pipeline op directory
 runtime/               bare-metal glue: crt0, semihosting, linker scripts, bench main
+runtime/snitch/snitch_ssr.h    Xssr/Xfrep intrinsics as raw instruction encodings
+runtime/snitch/kernels/        the FP kernels Snitch overrides (MatMul/GEMM/Conv2d)
+runtime/tests/         standalone bare-metal checks (`make ssr-test` runs the SSR ones)
 targets/*_real.py      GVSoC targets with the memory system modelled (the default)
 targets/cva6_ideal.py  GVSoC target with zero-latency memory (--memory ideal)
 targets/hetero/        memory-system parameters + the timing-cache model (C++ and generator)
@@ -111,7 +119,10 @@ results/               metrics JSON per op — committed as the verified baselin
    `Network.c` (kernel calls + weights) plus `testinputs.h` / `testoutputs.h`.
 2. **Per-core build** — the same generated C is cross-compiled three times.
    Kernels for Spatz are compiled `-O3 -ffast-math` so GCC autovectorizes them to
-   RVV; glue code stays scalar. Snitch/Spatz builds avoid the C extension because
+   RVV; glue code stays scalar. Snitch replaces three of the Deeploy kernels
+   with SSR/FREP versions of its own (below); the Deeploy ones stay linked in as
+   `<name>_generic` and still run the shapes the rewrite does not cover.
+   Snitch/Spatz builds avoid the C extension because
    the GVSoC Snitch model executes compressed FP loads on the integer core,
    diverging from the decoupled FP subsystem.
 3. **Simulation** — each ELF runs on its GVSoC board; `bench_main.c` reads
@@ -120,6 +131,110 @@ results/               metrics JSON per op — committed as the verified baselin
    `--memory`; the binary does not, so both models run the same code.
 4. **Report** — `run.py` parses the metrics and the `[HES-MEM]` cache counters and
    emits the comparison table + JSON.
+
+## The Snitch FP extensions (Xssr / Xfrep)
+
+A Snitch core is a small integer core in front of a decoupled FP subsystem, and
+two vendor extensions are what make that split pay off:
+
+- **Xssr** — stream semantic registers. `ft0`/`ft1`/`ft2` stop being registers:
+  once a data mover is configured with a loop nest (up to four levels of bounds
+  and strides, plus a repeat count), every read of `ft0` pops the next element
+  of the stream out of memory and every write pushes one back. Loads, address
+  arithmetic and pointer bumps leave the loop.
+- **Xfrep** — FP repetition. `frep.o rs1, len, 0, 0` hands the next `len`
+  instructions to the FPU sequencer, which replays them `rs1`+1 times from its
+  16-entry buffer. The integer core issues the body once and is then done.
+
+An inner loop that was load / load / fmadd / bump / branch becomes one `frep.o`
+over a handful of `fmadd.s`, running at whatever rate the streams can feed.
+
+### Emitting them from GCC
+
+`riscv-none-elf-gcc` supports neither extension (there is no upstream binutils
+support for either), so [`runtime/snitch/snitch_ssr.h`](runtime/snitch/snitch_ssr.h) emits
+each one as a raw encoding via `.insn`, which needs nothing from the assembler:
+
+| instruction | emitted as |
+|-------------|------------|
+| `scfgwi rs1, reg<<5\|ssr` — write an SSR config register | `.insn r 0x2b, 2, reg, x0, rs1, x<ssr>` |
+| `scfgri rd, reg<<5\|ssr` — read one back                 | `.insn r 0x2b, 1, reg, rd, x0, x<ssr>` |
+| `frep.o rs1, len, 0, 0` — repeat the next `len` insns    | `.insn i 0x0b, 0, x1, rs1, len-1` |
+| `frep.i rs1, len, 0, 0` — repeat each of them in place   | `.insn i 0x0b, 0, x0, rs1, len-1` |
+
+The `x1`/`x0` in the frep encodings is not a register: that field carries
+`stagger_mask<<1 | is_outer`, and register staggering is unused here. Enabling
+the streams is an ordinary CSR write (`csrsi 0x7c0, 1`), which GCC can already
+assemble.
+
+On top of those, the header provides the same calls the Snitch runtime does —
+`ssr_loop_1d`..`4d`, `ssr_repeat`, `ssr_read`, `ssr_write` — including its
+convention that a bound register holds count-1 and that stride *i*+1 is the
+*delta* applied when loop *i* wraps, i.e. the next step minus the distance the
+inner loop already travelled.
+
+While SSR is enabled every FP instruction touching ft0-ft2 consumes stream
+elements, including anything the compiler decides to emit there. The enable and
+disable therefore sit inside the same `asm volatile` block as the loop body, so
+the enabled window holds exactly the instructions written by hand, and ft0-ft2
+are clobbered so the register allocator stays away from them.
+
+### The kernels
+
+`pipeline/run.py` compiles [`runtime/snitch/kernels/`](runtime/snitch/kernels)
+for the snitch core and renames the Deeploy Generic definitions it replaces to
+`<name>_generic` (a `-D` applied to the Generic library alone). The generated
+network keeps calling the original names and so gets the streamed version; the
+streamed version calls `<name>_generic` for the shapes it does not cover.
+
+| kernel | ft0 | ft1 | FREP body |
+|--------|-----|-----|-----------|
+| `MatMul_fp32_fp32_fp32`, `Gemm_fp32_fp32_fp32_fp32` | `A[i][k]`, held for 8 FMAs | 8 consecutive `B[k][j]` | 8 `fmadd.s`, replayed N times |
+| `Conv2d_fp32_fp32_fp32_NCHW` | input window element, held for 4 FMAs | tap *k* of 4 filters | 4 `fmadd.s`, replayed C·P·Q times |
+
+Both put the *reused* operand on ft0 with an SSR repeat count, so the two
+streams issue 1 + unroll accesses per unroll FMAs; both unroll wide enough that
+the independent accumulators cover the 3-cycle FMA latency. That ratio is what
+sets the speed: the model funnels the three SSR ports through one per-core
+router, which `make ssr-test` measures at about one element per cycle, so
+GEMM's 9 accesses per 8 FMAs puts the floor near 1.1 cycles/FMA. It measures
+1.33, the difference being the per-block C loads, result stores and FREP setup
+outside the streamed body.
+
+Reductions keep the generic order, so MatMul and Conv2d come out bit-identical
+to the scalar kernels; GEMM differs in the last bit only because it starts its
+accumulator at C instead of adding C at the end.
+
+Columns past the last full block, transposed GEMM operands and filters past the
+last group of four run scalar. `make ssr-test` exercises exactly those paths
+(plus a streaming probe) on `snitch_real` — the benchmark ops only reach the
+shapes that divide evenly.
+
+### What it buys
+
+Snitch cycles for the timed op, everything else unchanged:
+
+| op                     | scalar FP | Xssr + Xfrep |        |
+|------------------------|-----------|--------------|--------|
+| Conv/Regular_2D_Bias   | 1.14M     | 174k         | 6.5x   |
+| GEMM/Regular           | 214k      | 43.5k        | 4.9x   |
+| MatMul                 | 52.7k     | 12.6k        | 4.2x   |
+| mymatmul (32×32×32)    | 206k      | 43.1k        | 4.8x   |
+
+which is enough to put one Snitch core ahead of the 4-lane Spatz on all four ops
+(Conv 174k vs 457k, GEMM 43.5k vs 60.9k, MatMul 12.6k vs 15.8k, mymatmul 43.1k
+vs 57.6k).
+
+Three ops in the baseline are untouched, and none of them can use the
+extensions:
+
+- **Softmax** spends its cycles inside `expf`; FREP replays FP instructions from
+  a 16-entry buffer, not a libm call, and the surrounding max/sum/scale passes
+  are a small part of the total.
+- **Integer GEMM** reduces in integer registers. SSR feeds the FP regfile and
+  FREP replays FP instructions, so neither applies.
+- **Add** is emitted inline into the generated `Network.c` by Deeploy instead of
+  being called as a kernel, so there is no function to override.
 
 ## The memory system
 
@@ -177,15 +292,17 @@ Same binaries, same ops, `--memory real` against `--memory ideal`:
 | op                     | cva6                | snitch            | spatz              |
 |------------------------|---------------------|-------------------|--------------------|
 | Add/Regular            | 715 → 863 (+21%)    | 1053 (unchanged)  | 635 → 1035 (+63%)  |
-| Conv/Regular_2D_Bias   | 1.74M → 1.86M (+7%) | 1.14M (unchanged) | 452k → 457k (+1%)  |
-| GEMM/Regular           | 473k → 489k (+3%)   | 214k (unchanged)  | 59.8k → 60.9k (+2%)|
-| MatMul                 | 118k → 119k (+1%)   | 52.7k (unchanged) | 14.6k → 15.8k (+8%)|
+| Conv/Regular_2D_Bias   | 1.74M → 1.86M (+7%) | 174k (unchanged)  | 452k → 457k (+1%)  |
+| GEMM/Regular           | 473k → 489k (+3%)   | 43.5k (unchanged) | 59.8k → 60.9k (+2%)|
+| MatMul                 | 118k → 119k (+1%)   | 12.6k (unchanged) | 14.6k → 15.8k (+8%)|
 | Softmax/Regular        | 34.1k → 36.5k (+7%) | 51.0k (unchanged) | 30.4k → 32.5k (+7%)|
 | Integer GEMM/Regular   | 575k → 576k (+0.2%) | 452k (unchanged)  | 82.4k → 84.1k (+2%)|
 
 Snitch does not move because GVSoC's Snitch board already charged 100 cycles for HBM,
 which is the DRAM latency the three targets now share; its instruction fetches do pay
-it, and raising `DRAM_LATENCY` to 1000 lengthens the Conv run by 4%. Spatz moves
+it, and raising `DRAM_LATENCY` to 1000 lengthens the Conv run by 25% (it was 4% before
+the SSR/FREP kernels: the compute shrank 6.5x, the instruction refills did not, so the
+same memory system now costs proportionally more). Spatz moves
 because its board mapped HBM with *zero* latency, so instruction fetches that missed
 the 8 KiB cluster cache used to refill for free. CVA6 moves because it had no memory
 system at all.
@@ -208,8 +325,13 @@ capacity misses, store traffic and instruction refills, not the cold start.
   implement trap and are reported as a failed run rather than a wrong number.
   Four gaps hit by autovectorized code are fixed in `deps/patches/` — see
   `## GVSoC model fixes` below.
-- Multi-core parallelization (8-core Snitch cluster, multi-CC Spatz) is not used:
-  each run measures one core of each type, apples-to-apples.
+- The cores do not run identical code, on purpose: the numbers are meant to be
+  each core at its best, not a controlled experiment on one source. Snitch uses
+  Xssr/Xfrep, Spatz uses RVV, CVA6 runs the scalar kernels.
+- Multi-core parallelization (8-core Snitch cluster, multi-CC Spatz) is still
+  not used: every number is one core of each type. That is the largest
+  remaining lever on the Snitch and Spatz numbers, and it needs a cluster
+  runtime (barriers, DMA, per-core tiling) rather than a kernel rewrite.
 
 ## GVSoC model fixes
 

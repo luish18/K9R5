@@ -54,9 +54,20 @@ class Core:
     # GVSoC target per memory model, keyed as in MEMORY_MODELS.
     targets: dict[str, str]
     kernel_flags: list[str] = field(default_factory=list)
+    # Core-specific kernels compiled in addition to the Deeploy Generic ones,
+    # and the Generic functions they replace. Each replaced function is renamed
+    # <name>_generic across the Generic library, which frees the name for the
+    # core-specific definition and keeps the original reachable as a fallback
+    # for the shapes the optimized version does not cover.
+    kernel_srcs: list[Path] = field(default_factory=list)
+    kernel_overrides: list[str] = field(default_factory=list)
+    kernel_incs: list[Path] = field(default_factory=list)
 
     def target(self, memory: str) -> str:
         return self.targets[memory]
+
+    def rename_flags(self) -> list[str]:
+        return [f"-D{sym}={sym}_generic" for sym in self.kernel_overrides]
 
 
 # How main memory is simulated. `real` uses the targets in targets/, which
@@ -85,6 +96,14 @@ CORES = {
         mabi="ilp32d",
         linker=RUNTIME / "snitch" / "link.ld",
         kernel_flags=["-O3"],
+        # Snitch's FP subsystem is only worth its area with Xssr and Xfrep, so
+        # the FP kernels that dominate these ops are hand-written against them
+        # (runtime/snitch/snitch_ssr.h). GCC knows neither extension; both are
+        # emitted as raw encodings.
+        kernel_srcs=sorted((RUNTIME / "snitch" / "kernels").glob("*.c")),
+        kernel_overrides=["MatMul_fp32_fp32_fp32", "Gemm_fp32_fp32_fp32_fp32",
+                          "Conv2d_fp32_fp32_fp32_NCHW"],
+        kernel_incs=[RUNTIME / "snitch"],
     ),
     "spatz": Core(
         name="spatz",
@@ -219,6 +238,7 @@ def build(core: Core, gen_dir: Path, out_dir: Path) -> Path:
     elf = out_dir / "net.elf"
 
     incs = [f"-I{gen_dir}", f"-I{GENERIC_LIB / 'inc'}", f"-I{RUNTIME / 'common'}"]
+    incs += [f"-I{p}" for p in core.kernel_incs]
     arch = ["-march=" + core.march, "-mabi=" + core.mabi]
 
     objs = []
@@ -240,7 +260,10 @@ def build(core: Core, gen_dir: Path, out_dir: Path) -> Path:
     kernels = sorted((GENERIC_LIB / "src").glob("*.c"))
 
     compile_(glue, GLUE_FLAGS, "glue")
-    compile_(kernels, core.kernel_flags, "k")
+    # The rename only applies to the Generic library: the generated network and
+    # the core's own kernels keep calling the overridden names.
+    compile_(kernels, core.kernel_flags + core.rename_flags(), "k")
+    compile_(core.kernel_srcs, core.kernel_flags, "core")
 
     r = sh([str(TC), *arch, *COMMON_FLAGS, f"-T{core.linker}",
             *[str(o) for o in objs], *LINK_LIBS, "-o", str(elf)],
@@ -372,7 +395,10 @@ def main():
     test_dir = resolve_test_dir(args.op)
     op_name = test_dir.name if test_dir.name != "." else "op"
     try:
-        op_name = str(test_dir.relative_to(DEEPLOY_TEST / "Tests")).replace("/", "_")
+        # resolve() both sides: test_dir is resolved, so a symlinked deps/
+        # checkout would otherwise not compare equal and the op would lose its
+        # Tests/-relative name.
+        op_name = str(test_dir.relative_to((DEEPLOY_TEST / "Tests").resolve())).replace("/", "_")
     except ValueError:
         pass
 

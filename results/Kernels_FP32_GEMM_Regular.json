@@ -49,12 +49,12 @@
       "core": "snitch",
       "target": "snitch_real",
       "status": "ok",
-      "cycles": 213628,
+      "cycles": 43492,
       "instret": null,
       "errors": 0,
       "outputs": 1024,
-      "maxdiff": 3e-06,
-      "sim_wall_s": 1.1
+      "maxdiff": 2e-06,
+      "sim_wall_s": 0.9
     },
     {
       "core": "spatz",
