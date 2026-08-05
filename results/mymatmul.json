@@ -49,7 +49,7 @@
       "core": "snitch",
       "target": "snitch_real",
       "status": "ok",
-      "cycles": 206037,
+      "cycles": 43079,
       "instret": null,
       "errors": 0,
       "outputs": 1024,
