@@ -90,6 +90,44 @@ the results JSON) are traced too. Commands that produce nothing are shown as
 `(not created)`, which is what a failed compile or a timed-out simulation looks
 like.
 
+## Results
+
+Cycles for the timed op, one core of each type, on the default modelled-memory
+targets. `×` is against CVA6; the fastest core in each row is in bold. Every
+row is verified against the ONNX reference and reproduced by
+`results/<op>.json`.
+
+| operator | shape | cva6 | snitch | spatz |
+|----------|-------|------|--------|-------|
+| Add                | 64 × fp32, elementwise                       | **863**  | 1053 (0.8×)        | 1035 (0.8×)      |
+| MatMul             | 2 × (16×32 · 32×8) fp32                      | 119.0k   | **12.6k (9.4×)**   | 15.8k (7.5×)     |
+| MatMul (custom op) | 32×32×32 fp32                                | 477.5k   | **43.1k (11.1×)**  | 57.6k (8.3×)     |
+| GEMM               | 32×32×32 fp32 + bias                         | 489.0k   | **43.5k (11.2×)**  | 60.9k (8.0×)     |
+| GEMM (int8)        | 32×32×32, s8·s8 → s32                        | 575.9k   | 451.7k (1.3×)      | **84.1k (6.8×)** |
+| Conv2D + bias      | 2×64×32 fp32, 4 filters 2×8×8, stride 2×4    | 1.86M    | **173.9k (10.7×)** | 457.0k (4.1×)    |
+| Softmax            | 512 fp32, 32 rows of 16                      | 36.5k    | 51.0k (0.7×)       | **32.5k (1.1×)** |
+
+Reading it:
+
+- **One Snitch core takes every fp32 reduction**, including from the 4-lane
+  Spatz. Xssr removes the loads and the address arithmetic and Xfrep removes
+  the loop, which leaves an FMA rate the stream bandwidth sets — see
+  [The Snitch FP extensions](#the-snitch-fp-extensions-xssr--xfrep).
+- **Spatz takes int8 GEMM**, by 5.4× over Snitch: SSR feeds the FP regfile and
+  FREP replays FP instructions, so neither helps an integer reduction, while
+  RVV vectorizes it directly.
+- **Softmax is `expf`-bound** on all three, so they land within 1.6× of each
+  other and no amount of streaming or vectorizing moves it. Snitch is last
+  because the libm code is scalar work on its small integer core.
+- **Add is too small to say anything** — 64 elements, where the result is
+  dominated by call and loop overhead rather than the 64 additions.
+
+`--memory ideal` (zero-latency memory, `results/<op>-ideal.json`) keeps the same
+ordering everywhere except Add, where Spatz's 635 cycles edge out CVA6's 715
+once its instruction fetches stop paying DRAM. The cost of the modelled memory
+system per core is broken down under
+[What it costs](#what-it-costs).
+
 ## Layout
 
 ```
