@@ -191,7 +191,66 @@ Deliberate cuts, listed so a reviewer can object to them individually:
   3–5 have nothing to stand on. It is deliberately scheduled before any Deeploy
   work.
 
-## 7. Open questions
+## 7. Status
+
+| phase | state |
+|---|---|
+| 0 — machine model | **done** — `targets/hetero/system.py` |
+| 1a — host + cluster + L2 | **built and booting**, validation blocked (below) |
+| 1b — mesh, D2D, L3, HyperRAM | L3 and HyperRAM levels exist; D2D and the second cluster not started |
+| 2–5 | not started |
+
+`targets/mesh_real.py` boots the CVA6 manager out of L2, instantiates the
+Snitch cluster halted at `0x1000_0000`, and the manager reaches all four levels
+(L2, L3, HyperRAM, cluster TCDM). `make mesh-test` builds and runs the probe.
+
+The host was given the L1 I$/D$ from `memsys.py` after the first probe run: with
+the manager fetching straight out of the shared L2, changing *L2's* latency
+moved the *HyperRAM* measurement, because instruction fetch — not the kernel —
+was setting the cycle count. A manager without private caches was not a
+plausible machine anyway.
+
+### Findings
+
+**The GVSoC CVA6 model does not charge load-to-use latency.** The probe measures
+5 cycles per dependent load at *every* level — L2 (configured 20), L3 (50),
+HyperRAM (150) — while the host data cache reports 25.6M latency cycles over
+9.2k misses that never reach `mcycle`.
+
+This is not a bug in the new board. The same probe on the pre-existing
+`cva6_real` target reports the same 5 cycles for a chain that misses the data
+cache on every access. In that model an instruction's handler runs at *commit*,
+and nothing in the commit FSM consults the scoreboard timestamp the LSU writes
+for a load — `deps/patches/gvsoc-core-cva6-load-latency.patch` stopped that
+timestamp being overwritten, but nothing ever waits on it. A prototype commit
+gate (hold the head of the queue until its input registers are ready) changed
+nothing, which places the gap upstream: the latency the memory system computes
+is not reaching the LSU at all. Instruction fetch *is* charged — that is where
+the +1–7% in "What it costs" comes from.
+
+Consequences, in order of importance:
+
+1. **Phase 1 cannot be validated on the host core** until this is fixed, so the
+   probe is committed failing rather than silently weakened.
+2. **The published CVA6 numbers understate data-side memory cost.** The
+   `--memory real` vs `ideal` deltas in the README are mostly instruction-fetch
+   effects. Snitch and Spatz are unaffected: their in-order model charges
+   `stall_cycles`, which is why the Xssr/Xfrep measurements stand.
+3. Fixing it changes every committed CVA6 baseline, so it is a decision, not a
+   cleanup.
+
+Two ways forward, neither started:
+
+- **Fix the model.** Trace where `req->get_latency()` is lost between the timing
+  cache and `Lsu::data_req`, patch it in `deps/patches/` like the other model
+  fixes, and re-run the CVA6 baselines. Correct, and it makes the host numbers
+  mean something, but it invalidates published results.
+- **Validate on a cluster core instead.** Snitch charges memory latency
+  correctly, so moving the probe onto a cluster core in phase 2 validates the
+  memory hierarchy without touching the CVA6 model. Cheaper, and leaves the host
+  core's numbers known-optimistic.
+
+## 8. Open questions
 
 1. Cluster count and cores per cluster to publish results at — 2×8 for
    iteration, 8×8 for the headline number?

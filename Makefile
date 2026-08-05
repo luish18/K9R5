@@ -7,9 +7,9 @@ ROOT := $(CURDIR)
 MEM ?= real
 # DEBUG=1 traces every command the pipeline runs and the files it generated
 DBG := $(if $(DEBUG),--debug)
-TARGETS := cva6 snitch spatz cva6_real snitch_real spatz_real
+TARGETS := cva6 snitch spatz cva6_real snitch_real spatz_real mesh_real
 
-.PHONY: run gvsoc smoke ssr-test clean
+.PHONY: run gvsoc smoke ssr-test mesh-test clean
 
 # Snitch bare-metal test build (the pipeline's snitch flags, minus the
 # generated network) used by the ssr-test target below.
@@ -50,6 +50,21 @@ ssr-test:
 	    --target-dir=$(ROOT)/targets --target=snitch_real --binary=$$t.elf run \
 	    2>/dev/null | grep -v '^WARNING'); \
 	done
+
+# Phase-1a check for the mesh_real board: boot the CVA6 manager and measure
+# each memory level against targets/hetero/system.py. Currently reports FAIL on
+# the latency deltas — see "Findings" in docs/hetero-mesh-plan.md.
+mesh-test:
+	@mkdir -p work/mesh-test
+	toolchains/xpack-riscv-none-elf-gcc-15.2.0-1/bin/riscv-none-elf-gcc \
+	  -march=rv64imafdc_zicsr_zifencei -mabi=lp64d -mcmodel=medany \
+	  -nostdlib -nostartfiles -O2 -Iruntime/common -Iruntime/mesh \
+	  -Truntime/mesh/link_host.ld runtime/common/crt0.S runtime/common/syscalls.c \
+	  runtime/tests/mesh_probe.c -Wl,--gc-sections -lc -lm -lgcc \
+	  -o work/mesh-test/mesh_probe.elf
+	@(cd work/mesh-test && PATH="$(ROOT)/.venv/bin:$$PATH" $(ROOT)/$(GVSOC) \
+	  --target-dir=$(ROOT)/targets --target=mesh_real --binary=mesh_probe.elf run \
+	  2>/dev/null | grep -v '^WARNING') || true
 
 clean:
 	rm -rf work/*
