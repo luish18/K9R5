@@ -1,0 +1,9 @@
+.git
+deps/*
+!deps/patches
+toolchains/
+work/
+.venv/
+__pycache__/
+*.pyc
+.claude/settings.local.json

@@ -35,6 +35,21 @@ builds the simulator (including the targets in `targets/` and their cache model)
 
 It needs `uv`, `cmake`, `git`, `curl`, and a C++ toolchain; re-running it is safe.
 
+### Docker
+
+`Dockerfile` runs the same `./setup.sh` inside an Ubuntu 22.04 image, so it works the
+same on any platform Docker runs on:
+
+```bash
+docker build -t hetero-sim .
+docker run --rm hetero-sim                                                    # default op
+docker run --rm hetero-sim python pipeline/run.py Tests/Kernels/FP32/MatMul   # any op
+docker run --rm -it hetero-sim bash                                           # shell
+```
+
+The image bakes in the built GVSoC targets, so no fetching happens at container start;
+only the `docker build` needs network access.
+
 ## Usage
 
 Run a bundled Deeploy single-op test (`network.onnx` + `inputs.npz` + `outputs.npz`):
