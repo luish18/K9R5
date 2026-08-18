@@ -1,6 +1,7 @@
 {
   "op": "Kernels_Integer_GEMM_Regular",
   "memory": "ideal",
+  "spatz_kernels": "tuned",
   "results": [
     {
       "core": "cva6",
@@ -22,7 +23,7 @@
       "errors": 0,
       "outputs": 1024,
       "maxdiff": 0.0,
-      "sim_wall_s": 0.9
+      "sim_wall_s": 1.1
     },
     {
       "core": "spatz",
@@ -33,7 +34,7 @@
       "errors": 0,
       "outputs": 1024,
       "maxdiff": 0.0,
-      "sim_wall_s": 0.9
+      "sim_wall_s": 1.1
     }
   ]
 }
