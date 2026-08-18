@@ -6,6 +6,7 @@ Usage:
   python pipeline/run.py /path/to/dir                               # dir with network.onnx + inputs.npz + outputs.npz
   python pipeline/run.py <op> --cores cva6,snitch,spatz
   python pipeline/run.py <op> --memory ideal                        # zero-latency memory instead of the modelled one
+  python pipeline/run.py <op> --spatz-kernels autovec               # GCC's RVV instead of the hand-written kernels
   python pipeline/run.py <op> --debug                               # trace every command and the files it produced
                                                                     # (same as HES_DEBUG=1; trace goes to stderr)
 
@@ -111,11 +112,30 @@ CORES = {
         march="rv32imafd_zicsr_zifencei_v",
         mabi="ilp32d",
         linker=RUNTIME / "spatz" / "link.ld",
-        # Autovectorize kernels to RVV. -ffast-math is required for GCC to
-        # vectorize FP reductions (dot products / GEMM inner loops).
+        # Flags for the kernels GCC still compiles: -ffast-math is what lets it
+        # vectorize FP reductions at all. The MatMul/GEMM kernels that dominate
+        # these ops are hand-written against RVV instead (SPATZ_TUNED_KERNELS,
+        # applied in main), because autovectorizing them puts the reduction
+        # inside the vector unit and costs about 5x.
         kernel_flags=["-O3", "-ffast-math"],
     ),
 }
+
+# Hand-written RVV kernels for Spatz, applied unless --spatz-kernels autovec
+# asks for whatever GCC makes of the Deeploy Generic sources. Autovectorized
+# RVV puts the reduction inside the vector unit -- a strided gather down a
+# column of B plus a vfredusum per output element -- which costs about 5x.
+SPATZ_TUNED_KERNELS = {
+    "kernel_srcs": sorted((RUNTIME / "spatz" / "kernels").glob("*.c")),
+    "kernel_overrides": ["MatMul_fp32_fp32_fp32", "Gemm_fp32_fp32_fp32_fp32"],
+    "kernel_incs": [RUNTIME / "spatz"],
+}
+
+# Clearing these on a Core drops its hand-written kernels and leaves the
+# generated network calling the Deeploy ones. Spatz declares none of them
+# statically -- they are applied below -- so clearing is what keeps
+# --spatz-kernels autovec honest if any are ever added to CORES.
+KERNEL_FIELDS = ("kernel_srcs", "kernel_overrides", "kernel_incs")
 
 GLUE_FLAGS = ["-O2", "-fno-tree-vectorize"]
 COMMON_FLAGS = ["-mcmodel=medany", "-nostdlib", "-nostartfiles", "-ffunction-sections",
@@ -337,11 +357,14 @@ def simulate(core: Core, memory: str, elf: Path, run_dir: Path, timeout_s: int):
     return result
 
 
-def report(op_name: str, memory: str, results: list[dict]) -> None:
+def report(op_name: str, memory: str, results: list[dict],
+           spatz_kernels: str = "tuned") -> None:
     ok = {r["core"]: r for r in results if "cycles" in r}
     base = ok.get("cva6")
 
-    print(f"\n=== {op_name} — per-core performance ({MEMORY_MODELS[memory]}) ===\n")
+    kern = "" if spatz_kernels == "tuned" else f", spatz kernels: {spatz_kernels}"
+    print(f"\n=== {op_name} — per-core performance "
+          f"({MEMORY_MODELS[memory]}{kern}) ===\n")
     hdr = f"{'core':8} {'status':13} {'cycles':>12} {'instret':>10} {'speedup':>9}  {'maxdiff':>10}"
     print(hdr)
     print("-" * len(hdr))
@@ -371,8 +394,11 @@ def report(op_name: str, memory: str, results: list[dict]) -> None:
 
     RESULTS.mkdir(exist_ok=True)
     suffix = "" if memory == DEFAULT_MEMORY else f"-{memory}"
+    suffix += "" if spatz_kernels == "tuned" else f"-spatz-{spatz_kernels}"
     out = RESULTS / f"{op_name.replace('/', '_')}{suffix}.json"
-    out.write_text(json.dumps({"op": op_name, "memory": memory, "results": results}, indent=2))
+    out.write_text(json.dumps({"op": op_name, "memory": memory,
+                               "spatz_kernels": spatz_kernels,
+                               "results": results}, indent=2))
     note_file(out, "per-core metrics")
     print(f"results written to {out.relative_to(ROOT)}")
 
@@ -384,6 +410,10 @@ def main():
     ap.add_argument("--cores", default="cva6,snitch,spatz")
     ap.add_argument("--memory", choices=list(MEMORY_MODELS), default=DEFAULT_MEMORY,
                     help="how main memory is simulated (default: %(default)s)")
+    ap.add_argument("--spatz-kernels", choices=["tuned", "autovec"], default="tuned",
+                    help="MatMul/GEMM kernels for spatz: the hand-written RVV ones "
+                         "in runtime/spatz/kernels (default), or autovectorized "
+                         "from the Deeploy Generic sources")
     ap.add_argument("--timeout", type=int, default=600, help="per-sim timeout [s]")
     ap.add_argument("-d", "--debug", action="store_true",
                     help="trace every command run and the files it generated (on stderr)")
@@ -391,6 +421,13 @@ def main():
 
     global DEBUG
     DEBUG = args.debug or os.environ.get("HES_DEBUG", "") not in ("", "0")
+
+    if args.spatz_kernels == "tuned":
+        for key, value in SPATZ_TUNED_KERNELS.items():
+            setattr(CORES["spatz"], key, value)
+    else:
+        for field in KERNEL_FIELDS:
+            setattr(CORES["spatz"], field, [])
 
     test_dir = resolve_test_dir(args.op)
     op_name = test_dir.name if test_dir.name != "." else "op"
@@ -420,7 +457,7 @@ def main():
         results.append(simulate(core, args.memory, elf,
                                 work / cname / f"run-{args.memory}", args.timeout))
 
-    report(op_name, args.memory, results)
+    report(op_name, args.memory, results, args.spatz_kernels)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 {
   "op": "mymatmul",
   "memory": "ideal",
+  "spatz_kernels": "tuned",
   "results": [
     {
       "core": "cva6",
@@ -11,7 +12,7 @@
       "errors": 0,
       "outputs": 1024,
       "maxdiff": 0.0,
-      "sim_wall_s": 0.2
+      "sim_wall_s": 0.3
     },
     {
       "core": "snitch",
@@ -22,17 +23,17 @@
       "errors": 0,
       "outputs": 1024,
       "maxdiff": 0.0,
-      "sim_wall_s": 0.9
+      "sim_wall_s": 1.1
     },
     {
       "core": "spatz",
       "target": "spatz",
       "status": "ok",
-      "cycles": 56736,
+      "cycles": 6044,
       "instret": null,
       "errors": 0,
       "outputs": 1024,
-      "maxdiff": 4e-06,
+      "maxdiff": 0.0,
       "sim_wall_s": 0.9
     }
   ]
