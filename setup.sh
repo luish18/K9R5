@@ -52,7 +52,7 @@ if [ -d deps/gvsoc ]; then
 else
   git clone "$GVSOC_URL" deps/gvsoc
   git -C deps/gvsoc checkout --detach "$GVSOC_COMMIT"
-  git -C deps/gvsoc submodule update --init --recursive -j8
+  git -C deps/gvsoc submodule update --init --recursive --jobs=8
 fi
 
 log "GVSoC model patches"
