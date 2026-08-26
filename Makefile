@@ -7,9 +7,9 @@ ROOT := $(CURDIR)
 MEM ?= real
 # DEBUG=1 traces every command the pipeline runs and the files it generated
 DBG := $(if $(DEBUG),--debug)
-TARGETS := cva6 snitch spatz cva6_real snitch_real spatz_real
+TARGETS := cva6 snitch spatz cva6_real snitch_real spatz_real hetero_soc
 
-.PHONY: run gvsoc smoke ssr-test clean
+.PHONY: run gvsoc smoke ssr-test mesh-probe clean
 
 # Snitch bare-metal test build (the pipeline's snitch flags, minus the
 # generated network) used by the ssr-test target below.
@@ -50,6 +50,19 @@ ssr-test:
 	    --target-dir=$(ROOT)/targets --target=snitch_real --binary=$$t.elf run \
 	    2>/dev/null | grep -v '^WARNING'); \
 	done
+
+# hetero_soc board check: do the three cores boot in one simulation, and does
+# each level of the memory system answer at the cost hetero/system.py says?
+# Every cycle count the SoC produces later rests on this.
+mesh-probe:
+	$(PY) pipeline/gen_system_header.py --check
+	$(PY) pipeline/build_mesh.py --test mesh_probe
+	@cd work/mesh_probe && mkdir -p run && cd run && \
+	  HES_ELF_SNITCH=$(ROOT)/work/mesh_probe/snitch/snitch.elf \
+	  HES_ELF_SPATZ=$(ROOT)/work/mesh_probe/spatz/spatz.elf \
+	  PATH="$(ROOT)/.venv/bin:$$PATH" $(ROOT)/$(GVSOC) \
+	    --target-dir=$(ROOT)/targets --target=hetero_soc \
+	    --binary=$(ROOT)/work/mesh_probe/host/host.elf run 2>/dev/null | grep -v '^WARNING'
 
 clean:
 	rm -rf work/*
