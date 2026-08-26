@@ -1,0 +1,54 @@
+{
+  "op": "Kernels_FP32_MatMul",
+  "mapping": {
+    "pin": null,
+    "nodes": [
+      {
+        "node": "matmul_node",
+        "op": "MatMul",
+        "engine": "snitch"
+      }
+    ]
+  },
+  "result": {
+    "status": "ok",
+    "wall_s": 1.2,
+    "nodes": [
+      {
+        "node": 0,
+        "op": "MatMul",
+        "engine": "snitch",
+        "cycles": 7591
+      }
+    ],
+    "per_engine_cycles": {
+      "snitch": 7591
+    },
+    "waits": [],
+    "cycles": 8977,
+    "errors": 0,
+    "outputs": 256,
+    "maxdiff": 0.0,
+    "offload_failures": 0,
+    "caches": [
+      {
+        "cache": "icache",
+        "accesses": 3638,
+        "misses": 58,
+        "latency_cycles": 6601
+      },
+      {
+        "cache": "dcache",
+        "accesses": 2390,
+        "misses": 1009,
+        "latency_cycles": 59336
+      },
+      {
+        "cache": "l2",
+        "accesses": 1190,
+        "misses": 306,
+        "latency_cycles": 56548
+      }
+    ]
+  }
+}

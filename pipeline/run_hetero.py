@@ -1,0 +1,294 @@
+#!/usr/bin/env python3
+"""Run an ONNX graph on the hetero_soc board: one chip, three kinds of core.
+
+  python pipeline/run_hetero.py Tests/Kernels/FP32/GEMM/Regular
+  python pipeline/run_hetero.py ops/mnist --pin snitch
+
+Deeploy compiles the graph and decides which core runs each node
+(pipeline/hetero_platform); this drives that, builds the three binaries a run
+needs, starts the simulation, and reports.
+
+Unlike pipeline/run.py -- which measures three separate boards and can wait for
+each to finish -- a whole network on one board runs for minutes, so the
+simulator's output is streamed rather than captured. Every node the guest
+completes prints a beacon, and this turns those into a live progress line:
+
+  [ 5/11] Conv@snitch   sim 4.21 Mcyc  wall 108s  39 kcyc/s
+
+If no beacon arrives for --stall-timeout seconds the run is declared stalled
+and the last output is printed, so a wedged simulation is visible instead of
+being mistaken for a slow one.
+"""
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from build_mesh import build_network  # noqa: E402
+from common import GVSOC, PYTHON, RESULTS, ROOT, TARGETS, WORK, note_file, set_debug  # noqa: E402
+
+DEEPLOY_TEST = ROOT / "deps" / "deeploy" / "DeeployTest"
+
+PROG_RE = re.compile(r"\[HES-PROG\] sample=(\d+)/(\d+) node=(\d+) op=(\S+) "
+                     r"engine=(\S+) cycles=(\d+)")
+WAIT_RE = re.compile(r"\[HES-WAIT\] engine=(\S+) job=(\d+) kernel=(\d+) polls=(\d+)")
+DONE_RE = re.compile(r"\[HES\] core=(\S+) cycles=(\d+) instret=(\d+) errors=(\d+) "
+                     r"total=(\d+) maxdiff_e6=(\d+) offload_failures=(\d+)")
+MEM_RE = re.compile(r"\[HES-MEM\] cache=(\S+) accesses=(\d+) reads=(\d+) writes=(\d+) "
+                    r"hits=(\d+) misses=(\d+) latency_cycles=(\d+)")
+
+
+def resolve_op(op: str) -> Path:
+    for cand in (Path(op), DEEPLOY_TEST / op, DEEPLOY_TEST / "Tests" / op):
+        if (cand / "network.onnx").is_file():
+            return cand.resolve()
+    sys.exit(f"error: cannot find network.onnx under '{op}'")
+
+
+def generate(test_dir: Path, gen_dir: Path, pin, debug) -> dict:
+    cmd = [str(PYTHON), str(ROOT / "pipeline" / "hetero_platform" / "generate.py"),
+           "-t", str(test_dir), "-d", str(gen_dir)]
+    if pin:
+        cmd += ["--pin", pin]
+    r = subprocess.run(cmd, capture_output = not debug, text = True)
+    if r.returncode != 0:
+        sys.exit(f"Deeploy codegen failed:\n{r.stdout or ''}\n{r.stderr or ''}")
+    if not debug and r.stdout:
+        for line in r.stdout.splitlines():
+            if line.startswith("  "):
+                print(line)
+    return json.loads((gen_dir / "mapping.json").read_text())
+
+
+class Progress:
+    """One updating status line, driven by the guest's own beacons."""
+
+    def __init__(self, total_nodes: int, quiet: bool):
+        self.total = total_nodes
+        self.quiet = quiet
+        self.t0 = time.time()
+        self.last_beacon = self.t0
+        self.node = 0
+        self.sample = (0, 0)
+        self.sim_cycles = 0
+        self.per_engine = {}
+        self.per_node = []
+        self.waits = []
+
+    def _render(self, label: str) -> None:
+        if self.quiet:
+            return
+        wall = time.time() - self.t0
+        rate = self.sim_cycles / wall / 1000 if wall > 0 else 0
+        pos = f"[{self.node:2}/{self.total:2}]" if self.total else f"[{self.node:2}]"
+        if self.sample[1] > 1:
+            pos = f"[{self.sample[0]}/{self.sample[1]}]" + pos
+        sys.stdout.write(f"\r  {pos} {label:22} sim {self.sim_cycles / 1e6:7.2f} Mcyc  "
+                         f"wall {wall:5.0f}s  {rate:6.1f} kcyc/s   ")
+        sys.stdout.flush()
+
+    def beacon(self, m) -> None:
+        sample, samples, node, op, engine, cycles = m.groups()
+        self.last_beacon = time.time()
+        self.sample = (int(sample), int(samples))
+        self.node = int(node) + 1
+        self.sim_cycles += int(cycles)
+        self.per_engine[engine] = self.per_engine.get(engine, 0) + int(cycles)
+        self.per_node.append({"node": int(node), "op": op, "engine": engine,
+                              "cycles": int(cycles)})
+        self._render(f"{op}@{engine}")
+
+    def wait(self, m) -> None:
+        engine, job, kernel, polls = m.groups()
+        self.last_beacon = time.time()
+        self.waits.append({"engine": engine, "job": int(job), "polls": int(polls)})
+        self._render(f"waiting on {engine}")
+
+    def finish(self) -> None:
+        if not self.quiet:
+            sys.stdout.write("\r" + " " * 100 + "\r")
+            sys.stdout.flush()
+
+
+def simulate(elfs: dict, run_dir: Path, total_nodes: int, timeout_s: int,
+             stall_s: int, quiet: bool) -> dict:
+    run_dir.mkdir(parents = True, exist_ok = True)
+    env = dict(os.environ)
+    env["PATH"] = f"{ROOT / '.venv' / 'bin'}:{env['PATH']}"
+    env["HES_ELF_SNITCH"] = str(elfs["snitch"])
+    env["HES_ELF_SPATZ"] = str(elfs["spatz"])
+
+    cmd = [str(GVSOC), f"--target-dir={TARGETS}", "--target=hetero_soc",
+           f"--binary={elfs['host']}", "run"]
+
+    proc = subprocess.Popen(cmd, cwd = run_dir, env = env, text = True,
+                            stdout = subprocess.PIPE, stderr = subprocess.STDOUT,
+                            bufsize = 1)
+
+    prog = Progress(total_nodes, quiet)
+    lines, result, caches = [], None, []
+    stalled = False
+    t_start = time.time()
+
+    try:
+        for line in proc.stdout:
+            line = line.rstrip("\n")
+            if line.startswith("WARNING"):
+                continue
+            lines.append(line)
+
+            m = PROG_RE.search(line)
+            if m:
+                prog.beacon(m)
+                continue
+            m = WAIT_RE.search(line)
+            if m:
+                prog.wait(m)
+                continue
+            m = DONE_RE.search(line)
+            if m:
+                result = m
+                continue
+            m = MEM_RE.search(line)
+            if m:
+                caches.append(m)
+                continue
+            if line.strip():
+                if not quiet:
+                    sys.stdout.write("\r" + " " * 100 + "\r")
+                print(line)
+
+            if time.time() - prog.last_beacon > stall_s:
+                stalled = True
+                break
+            if time.time() - t_start > timeout_s:
+                break
+    finally:
+        prog.finish()
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+
+    (run_dir / "sim.log").write_text("\n".join(lines) + "\n")
+    note_file(run_dir / "sim.log", "simulator stdout+stderr")
+
+    out = {
+        "status": "ok",
+        "wall_s": round(time.time() - t_start, 1),
+        "nodes": prog.per_node,
+        "per_engine_cycles": prog.per_engine,
+        "waits": prog.waits,
+    }
+    if stalled:
+        out["status"] = "stalled"
+        out["log_tail"] = lines[-10:]
+    elif result is None:
+        out["status"] = "no-metrics"
+        out["log_tail"] = lines[-10:]
+    else:
+        out.update({
+            "cycles": int(result.group(2)),
+            "errors": int(result.group(4)),
+            "outputs": int(result.group(5)),
+            "maxdiff": int(result.group(6)) / 1e6,
+            "offload_failures": int(result.group(7)),
+        })
+        if out["errors"] or out["offload_failures"]:
+            out["status"] = "wrong-result"
+    if caches:
+        out["caches"] = [{
+            "cache": m.group(1).split("/")[-1],
+            "accesses": int(m.group(2)),
+            "misses": int(m.group(6)),
+            "latency_cycles": int(m.group(7)),
+        } for m in caches]
+    return out
+
+
+def report(op_name: str, mapping: dict, res: dict) -> None:
+    print(f"\n=== {op_name} on hetero_soc ===\n")
+
+    print(f"{'node':>4}  {'op':16} {'engine':8} {'cycles':>12}")
+    print("-" * 44)
+    for n in res["nodes"]:
+        print(f"{n['node']:>4}  {n['op']:16} {n['engine']:8} {n['cycles']:>12}")
+
+    if res["per_engine_cycles"]:
+        total = sum(res["per_engine_cycles"].values())
+        print(f"\n{'engine':8} {'cycles':>12} {'share':>8}")
+        print("-" * 30)
+        for engine, cycles in sorted(res["per_engine_cycles"].items(),
+                                     key = lambda kv: -kv[1]):
+            share = 100 * cycles / total if total else 0
+            print(f"{engine:8} {cycles:>12} {share:>7.1f}%")
+
+    print()
+    if res["status"] == "ok":
+        print(f"status   ok       cycles={res['cycles']}  maxdiff={res.get('maxdiff')}")
+    elif res["status"] == "stalled":
+        print("status   STALLED  no progress beacon before the stall timeout")
+        for line in res.get("log_tail", []):
+            print(f"  | {line}")
+    else:
+        print(f"status   {res['status']}")
+        for line in res.get("log_tail", []):
+            print(f"  | {line}")
+    print(f"wall     {res['wall_s']}s"
+          + (f"   (pinned to {mapping['pin']})" if mapping.get("pin") else ""))
+
+    RESULTS.mkdir(exist_ok = True)
+    suffix = f"-pin-{mapping['pin']}" if mapping.get("pin") else ""
+    out = RESULTS / f"{op_name.replace('/', '_')}-hetero{suffix}.json"
+    out.write_text(json.dumps({"op": op_name, "mapping": mapping, "result": res},
+                              indent = 2))
+    print(f"\nresults written to {out.relative_to(ROOT)}")
+
+
+def main():
+    ap = argparse.ArgumentParser(description = __doc__,
+                                 formatter_class = argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("op", help = "op dir (network.onnx + inputs.npz + outputs.npz)")
+    ap.add_argument("--pin", choices = ["cva6", "snitch", "spatz"],
+                    help = "force every node the engine can run onto it")
+    ap.add_argument("--timeout", type = int, default = 3600, help = "wall limit [s]")
+    ap.add_argument("--stall-timeout", type = int, default = 180,
+                    help = "declare a stall after this long with no beacon [s]")
+    ap.add_argument("-q", "--quiet", action = "store_true",
+                    help = "no live progress line")
+    ap.add_argument("-d", "--debug", action = "store_true")
+    args = ap.parse_args()
+
+    set_debug(args.debug or os.environ.get("HES_DEBUG", "") not in ("", "0"))
+
+    test_dir = resolve_op(args.op)
+    try:
+        op_name = str(test_dir.relative_to((DEEPLOY_TEST / "Tests").resolve())).replace("/", "_")
+    except ValueError:
+        op_name = test_dir.name
+
+    work = WORK / f"hetero_{op_name}" / (args.pin or "mapped")
+    gen_dir = work / "gen"
+
+    print(f"[1/3] Deeploy: {test_dir.name}/network.onnx -> C, mapped across engines")
+    mapping = generate(test_dir, gen_dir, args.pin, args.debug)
+
+    print(f"[2/3] build: host + snitch cluster + spatz cluster")
+    elfs = build_network(gen_dir, work)
+
+    print(f"[3/3] simulate on hetero_soc")
+    res = simulate(elfs, work / "run", len(mapping["nodes"]), args.timeout,
+                   args.stall_timeout, args.quiet)
+
+    report(op_name, mapping, res)
+    sys.exit(0 if res["status"] == "ok" else 1)
+
+
+if __name__ == "__main__":
+    main()

@@ -9,7 +9,7 @@ MEM ?= real
 DBG := $(if $(DEBUG),--debug)
 TARGETS := cva6 snitch spatz cva6_real snitch_real spatz_real hetero_soc
 
-.PHONY: run gvsoc smoke ssr-test mesh-probe mesh-test clean
+.PHONY: run gvsoc smoke ssr-test mesh-probe mesh-test hetero clean
 
 # Snitch bare-metal test build (the pipeline's snitch flags, minus the
 # generated network) used by the ssr-test target below.
@@ -77,6 +77,12 @@ mesh-test:
 	  PATH="$(ROOT)/.venv/bin:$$PATH" $(ROOT)/$(GVSOC) \
 	    --target-dir=$(ROOT)/targets --target=hetero_soc \
 	    --binary=$(ROOT)/work/mesh_offload/host/host.elf run 2>/dev/null | grep -v '^WARNING'
+
+# Run one op on the whole SoC, with Deeploy mapping each node to an engine.
+#   make hetero OP=Tests/Kernels/FP32/GEMM/Regular
+#   make hetero OP=... PIN=snitch      force one engine, for the comparison
+hetero:
+	$(PY) pipeline/run_hetero.py $(OP) $(if $(PIN),--pin $(PIN)) $(DBG)
 
 clean:
 	rm -rf work/*

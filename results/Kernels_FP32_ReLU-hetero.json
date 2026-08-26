@@ -1,0 +1,54 @@
+{
+  "op": "Kernels_FP32_ReLU",
+  "mapping": {
+    "pin": null,
+    "nodes": [
+      {
+        "node": "relu_node",
+        "op": "Relu",
+        "engine": "cva6"
+      }
+    ]
+  },
+  "result": {
+    "status": "ok",
+    "wall_s": 1.0,
+    "nodes": [
+      {
+        "node": 0,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 1706
+      }
+    ],
+    "per_engine_cycles": {
+      "cva6": 1706
+    },
+    "waits": [],
+    "cycles": 3207,
+    "errors": 0,
+    "outputs": 128,
+    "maxdiff": 0.0,
+    "offload_failures": 0,
+    "caches": [
+      {
+        "cache": "icache",
+        "accesses": 1116,
+        "misses": 50,
+        "latency_cycles": 5708
+      },
+      {
+        "cache": "dcache",
+        "accesses": 889,
+        "misses": 334,
+        "latency_cycles": 7203
+      },
+      {
+        "cache": "l2",
+        "accesses": 464,
+        "misses": 103,
+        "latency_cycles": 24647
+      }
+    ]
+  }
+}

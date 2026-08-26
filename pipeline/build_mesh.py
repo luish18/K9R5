@@ -130,6 +130,7 @@ def build(image: Image, sources, out_dir: Path, opt="-O2", extra_flags=(),
     compile_([image.crt0] + list(sources), [opt, *GLUE_FLAGS, *extra_flags], "glue")
 
     if with_kernels:
+        extra_flags = list(extra_flags)
         # The rename applies to the Generic library alone, so the cluster's own
         # kernels and the code calling them keep the original names.
         compile_(sorted((GENERIC_LIB / "src").glob("*.c")),
@@ -159,6 +160,30 @@ def build_test(test: str, work: Path, cluster_src=None, host_extra=()) -> dict:
                         with_kernels=with_kernels),
         "spatz": build(SPATZ, [cluster_src], work / "spatz",
                        with_kernels=with_kernels),
+    }
+
+
+def build_network(gen_dir: Path, work: Path, samples: int = 1) -> dict:
+    """Build the three ELFs for a Deeploy-generated network.
+
+    The host links the generated Network.c, the host runtime and the Generic
+    kernel library -- it runs the nodes the mapper left on it. Each cluster
+    links the job loop and its own kernels.
+    """
+    host_sources = [
+        RUNTIME / "common" / "syscalls.c",
+        MESH / "hes_host.c",
+        MESH / "host_main.c",
+        gen_dir / "Network.c",
+    ]
+    cluster_src = MESH / "cluster_main.c"
+    incs = [f"-I{gen_dir}"]
+
+    return {
+        "host": build(HOST, host_sources, work / "host", with_kernels = True,
+                      extra_flags = [*incs, f"-DHES_SAMPLES={samples}"]),
+        "snitch": build(SNITCH, [cluster_src], work / "snitch", with_kernels = True),
+        "spatz": build(SPATZ, [cluster_src], work / "spatz", with_kernels = True),
     }
 
 

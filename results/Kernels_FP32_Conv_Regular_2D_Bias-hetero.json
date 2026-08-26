@@ -1,0 +1,66 @@
+{
+  "op": "Kernels_FP32_Conv_Regular_2D_Bias",
+  "mapping": {
+    "pin": null,
+    "nodes": [
+      {
+        "node": "_EXTRACT_CONV_PASS_0_pad",
+        "op": "Pad",
+        "engine": "cva6"
+      },
+      {
+        "node": "0Conv",
+        "op": "Conv",
+        "engine": "snitch"
+      }
+    ]
+  },
+  "result": {
+    "status": "ok",
+    "wall_s": 1.9,
+    "nodes": [
+      {
+        "node": 0,
+        "op": "Pad",
+        "engine": "cva6",
+        "cycles": 128075
+      },
+      {
+        "node": 1,
+        "op": "Conv",
+        "engine": "snitch",
+        "cycles": 284288
+      }
+    ],
+    "per_engine_cycles": {
+      "cva6": 128075,
+      "snitch": 284288
+    },
+    "waits": [],
+    "cycles": 415421,
+    "errors": 0,
+    "outputs": 840,
+    "maxdiff": 0.0,
+    "offload_failures": 0,
+    "caches": [
+      {
+        "cache": "icache",
+        "accesses": 130248,
+        "misses": 70,
+        "latency_cycles": 7950
+      },
+      {
+        "cache": "dcache",
+        "accesses": 41340,
+        "misses": 21417,
+        "latency_cycles": 203208
+      },
+      {
+        "cache": "l2",
+        "accesses": 21650,
+        "misses": 993,
+        "latency_cycles": 517090
+      }
+    ]
+  }
+}
