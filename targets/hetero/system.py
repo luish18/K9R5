@@ -104,6 +104,13 @@ class Cluster:
     def __init__(self, name, base, nb_core, use_spatz, isa, load_base, load_size,
                  nb_perf_counters, core_type='accurate', spatz_nb_lanes=4,
                  first_hartid=0):
+        # A Spatz cluster's vector load/store unit is wired to the cluster TCDM
+        # only (SnitchCluster binds o_VLSU straight to the TCDM interleaver), so
+        # a vectorized kernel reading main memory returns garbage rather than
+        # faulting. Operands therefore have to be staged into TCDM before a
+        # kernel runs -- on this cluster that is a correctness requirement, not
+        # a performance choice.
+        self.requires_staging = use_spatz
         self.name = name
         self.base = base
         self.nb_core = nb_core
@@ -122,12 +129,19 @@ class Cluster:
     def dma_core(self):
         return 0 if self.use_spatz else self.nb_core - 1
 
-    # The core that takes the job descriptor and fans the work out. It has to
-    # be a core that is not the DMA core on the Snitch cluster (where core 8
-    # drives the DMA), and there is only one candidate on the Spatz pair.
+    # The core that takes the job descriptor, stages data and fans the work
+    # out. It has to be the DMA core: GVSoC binds the cluster's iDMA offload
+    # port to that core alone, so no other core can issue the Xdma
+    # instructions. This is also the snRuntime convention -- the Snitch
+    # cluster is 8 compute cores plus a DMA core, not 9 equal ones.
     @property
     def ctrl_core(self):
-        return 0
+        return self.dma_core
+
+    # Cores that run kernel work: every core except the DMA core.
+    @property
+    def nb_compute(self):
+        return self.nb_core - 1
 
     @property
     def tcdm_base(self):
@@ -246,7 +260,7 @@ CLUSTERS = [SNITCH_CLUSTER, SPATZ_CLUSTER]
 # window, so the descriptor is never overwritten by the cluster's own data.
 MAILBOX_OFFSET = 0x0000_0000
 MAILBOX_SIZE = 0x0000_0200       # 512 B
-MAILBOX_MAX_ARGS = 12
+MAILBOX_MAX_ARGS = 16
 
 # The host's heap and stack. The heap is what Deeploy's generated InitNetwork
 # allocates its input/output buffers from; every other tensor is static. Both

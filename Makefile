@@ -9,7 +9,7 @@ MEM ?= real
 DBG := $(if $(DEBUG),--debug)
 TARGETS := cva6 snitch spatz cva6_real snitch_real spatz_real hetero_soc
 
-.PHONY: run gvsoc smoke ssr-test mesh-probe clean
+.PHONY: run gvsoc smoke ssr-test mesh-probe mesh-test clean
 
 # Snitch bare-metal test build (the pipeline's snitch flags, minus the
 # generated network) used by the ssr-test target below.
@@ -63,6 +63,20 @@ mesh-probe:
 	  PATH="$(ROOT)/.venv/bin:$$PATH" $(ROOT)/$(GVSOC) \
 	    --target-dir=$(ROOT)/targets --target=hetero_soc \
 	    --binary=$(ROOT)/work/mesh_probe/host/host.elf run 2>/dev/null | grep -v '^WARNING'
+
+# hetero_soc dispatch check: the host hands a GEMM, a MatMul and a Conv2d to
+# both clusters, in main memory and staged into TCDM, and compares every
+# output element against the scalar kernel run on its own core.
+mesh-test:
+	$(PY) pipeline/gen_system_header.py --check
+	$(PY) pipeline/build_mesh.py --test mesh_offload --cluster cluster_main.c \
+	  --host-extra hes_host.c
+	@cd work/mesh_offload && mkdir -p run && cd run && \
+	  HES_ELF_SNITCH=$(ROOT)/work/mesh_offload/snitch/snitch.elf \
+	  HES_ELF_SPATZ=$(ROOT)/work/mesh_offload/spatz/spatz.elf \
+	  PATH="$(ROOT)/.venv/bin:$$PATH" $(ROOT)/$(GVSOC) \
+	    --target-dir=$(ROOT)/targets --target=hetero_soc \
+	    --binary=$(ROOT)/work/mesh_offload/host/host.elf run 2>/dev/null | grep -v '^WARNING'
 
 clean:
 	rm -rf work/*

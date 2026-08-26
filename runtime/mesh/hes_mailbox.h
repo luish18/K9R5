@@ -52,7 +52,9 @@ typedef struct {
   volatile uint32_t cycles;       /* cluster: cycles the last job took       */
   volatile uint32_t trap_cause;   /* cluster: mcause, if a core trapped      */
   volatile uint32_t nb_cores;     /* cluster: cores that ran the last job    */
-  volatile uint32_t reserved[3];
+  volatile uint32_t flags;        /* host: HES_JOB_* for this job            */
+  volatile uint32_t staged;       /* cluster: 1 if it staged into TCDM       */
+  volatile uint32_t error;        /* cluster: HES_ERR_* if it refused the job */
   volatile uint32_t args[HES_MAILBOX_MAX_ARGS];
   volatile uint32_t probe[16];    /* scratch for the latency probe           */
 } hes_mailbox_t;
@@ -65,6 +67,14 @@ _Static_assert(__builtin_offsetof(hes_mailbox_t, trap_cause) == HES_MBOX_TRAP_OF
 static inline hes_mailbox_t *hes_mailbox_at(uint32_t tcdm_base) {
   return (hes_mailbox_t *)(uintptr_t)(tcdm_base + HES_MAILBOX_OFFSET);
 }
+
+/* Why a cluster refused a job. */
+enum {
+  HES_ERR_NONE = 0,
+  /* The kernels on this cluster only reach cluster-local memory, and the
+     operands could not be staged into it. */
+  HES_ERR_NEEDS_STAGING = 1,
+};
 
 /* Kernel ids. 0 is reserved so a zeroed mailbox never looks like a job. */
 enum {

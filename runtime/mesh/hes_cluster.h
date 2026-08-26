@@ -21,6 +21,8 @@
 #define HES_MY_NB_CORE HES_SNITCH_NB_CORE
 #define HES_MY_DMA_CORE HES_SNITCH_DMA_CORE
 #define HES_MY_CTRL_CORE HES_SNITCH_CTRL_CORE
+#define HES_MY_NB_COMPUTE HES_SNITCH_NB_COMPUTE
+#define HES_MY_REQUIRES_STAGING HES_SNITCH_REQUIRES_STAGING
 #define HES_MY_FIRST_HARTID HES_SNITCH_FIRST_HARTID
 #define HES_MY_CL_CLINT_SET HES_SNITCH_CL_CLINT_SET
 #define HES_MY_CL_CLINT_CLEAR HES_SNITCH_CL_CLINT_CLEAR
@@ -39,6 +41,8 @@
 #define HES_MY_NB_CORE HES_SPATZ_NB_CORE
 #define HES_MY_DMA_CORE HES_SPATZ_DMA_CORE
 #define HES_MY_CTRL_CORE HES_SPATZ_CTRL_CORE
+#define HES_MY_NB_COMPUTE HES_SPATZ_NB_COMPUTE
+#define HES_MY_REQUIRES_STAGING HES_SPATZ_REQUIRES_STAGING
 #define HES_MY_FIRST_HARTID HES_SPATZ_FIRST_HARTID
 #define HES_MY_CL_CLINT_SET HES_SPATZ_CL_CLINT_SET
 #define HES_MY_CL_CLINT_CLEAR HES_SPATZ_CL_CLINT_CLEAR
@@ -79,6 +83,17 @@ static inline int hes_is_ctrl_core(void) {
 
 static inline int hes_is_dma_core(void) {
   return hes_core_idx() == HES_MY_DMA_CORE;
+}
+
+/* Index of this core among the compute cores, skipping the DMA core, so a
+ * kernel can slice its work by it. Undefined on the DMA core itself. */
+static inline uint32_t hes_compute_idx(void) {
+  uint32_t core = hes_core_idx();
+  return core > HES_MY_DMA_CORE ? core - 1 : core;
+}
+
+static inline int hes_is_compute_core(void) {
+  return hes_core_idx() != HES_MY_DMA_CORE;
 }
 
 /* Barrier across every core of the cluster. All of them must call it --

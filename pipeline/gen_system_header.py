@@ -168,7 +168,11 @@ def render(note: str) -> str:
         define(f"HES_{tag}_PERIPH", c.peripheral_base)
         define(f"HES_{tag}_NB_CORE", c.nb_core)
         define(f"HES_{tag}_DMA_CORE", c.dma_core)
-        define(f"HES_{tag}_CTRL_CORE", c.ctrl_core)
+        define(f"HES_{tag}_CTRL_CORE", c.ctrl_core,
+               "== DMA core: only it can issue Xdma")
+        define(f"HES_{tag}_NB_COMPUTE", c.nb_compute)
+        define(f"HES_{tag}_REQUIRES_STAGING", int(c.requires_staging),
+               "1: kernels only see cluster-local memory")
         define(f"HES_{tag}_FIRST_HARTID", c.first_hartid)
         define(f"HES_{tag}_LOAD_SCRATCH", c.scratch_base,
                "free main memory past this cluster's image")

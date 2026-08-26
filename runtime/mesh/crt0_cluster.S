@@ -22,6 +22,14 @@ _start:
     la      t0, trap_vec
     csrw    mtvec, t0
 
+    /* Enable the cluster-local interrupt in mie, but leave mstatus.MIE clear.
+     * wfi returns as soon as (mie & mip) is non-zero, while a trap is only
+     * taken when mstatus.MIE is set -- so the host's doorbell wakes the
+     * control core and execution simply continues after the wfi, with no
+     * handler to write. */
+    li      t0, (1 << HES_CLUSTER_IRQ)
+    csrs    mie, t0
+
     .option push
     .option norelax
     la      gp, __global_pointer$

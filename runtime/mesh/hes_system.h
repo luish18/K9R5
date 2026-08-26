@@ -56,7 +56,9 @@
 #define HES_SNITCH_PERIPH                0x10020000u
 #define HES_SNITCH_NB_CORE               9
 #define HES_SNITCH_DMA_CORE              8
-#define HES_SNITCH_CTRL_CORE             0
+#define HES_SNITCH_CTRL_CORE             8  /* == DMA core: only it can issue Xdma */
+#define HES_SNITCH_NB_COMPUTE            8
+#define HES_SNITCH_REQUIRES_STAGING      0  /* 1: kernels only see cluster-local memory */
 #define HES_SNITCH_FIRST_HARTID          0
 #define HES_SNITCH_LOAD_SCRATCH          0x86000000u  /* free main memory past this cluster's image */
 #define HES_SNITCH_LOAD_SCRATCH_SIZE     0x02000000u
@@ -73,7 +75,9 @@
 #define HES_SPATZ_PERIPH                 0x00120000u
 #define HES_SPATZ_NB_CORE                2
 #define HES_SPATZ_DMA_CORE               0
-#define HES_SPATZ_CTRL_CORE              0
+#define HES_SPATZ_CTRL_CORE              0  /* == DMA core: only it can issue Xdma */
+#define HES_SPATZ_NB_COMPUTE             1
+#define HES_SPATZ_REQUIRES_STAGING       1  /* 1: kernels only see cluster-local memory */
 #define HES_SPATZ_FIRST_HARTID           9
 #define HES_SPATZ_LOAD_SCRATCH           0x8a000000u  /* free main memory past this cluster's image */
 #define HES_SPATZ_LOAD_SCRATCH_SIZE      0x02000000u
@@ -89,7 +93,7 @@
 
 #define HES_MAILBOX_OFFSET               0
 #define HES_MAILBOX_SIZE                 0x200u
-#define HES_MAILBOX_MAX_ARGS             12
+#define HES_MAILBOX_MAX_ARGS             16
 #define HES_CLUSTER_STACK_SIZE           0x00001000u
 
 /* --- Engine ids -------------------------------------------------------- */
