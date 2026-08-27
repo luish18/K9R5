@@ -69,14 +69,14 @@
 #define HES_SNITCH_PERF_COUNTER_ENABLE   0x000u
 #define HES_SNITCH_NB_PERF_COUNTERS      16
 
-/* spatz: 2 cores, Snitch + Spatz VPU */
+/* spatz: 9 cores, Snitch + Spatz VPU */
 #define HES_SPATZ_BASE                   0x00100000u
 #define HES_SPATZ_TCDM                   0x00100000u
 #define HES_SPATZ_PERIPH                 0x00120000u
-#define HES_SPATZ_NB_CORE                2
+#define HES_SPATZ_NB_CORE                9
 #define HES_SPATZ_DMA_CORE               0
 #define HES_SPATZ_CTRL_CORE              0  /* == DMA core: only it can issue Xdma */
-#define HES_SPATZ_NB_COMPUTE             1
+#define HES_SPATZ_NB_COMPUTE             8
 #define HES_SPATZ_REQUIRES_STAGING       1  /* 1: kernels only see cluster-local memory */
 #define HES_SPATZ_FIRST_HARTID           9
 #define HES_SPATZ_LOAD_SCRATCH           0x8a000000u  /* free main memory past this cluster's image */

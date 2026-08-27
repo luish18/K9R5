@@ -233,13 +233,18 @@ SNITCH_CLUSTER = Cluster(
     load_size=SNITCH_LOAD_SIZE,
 )
 
-# The Snitch+Spatz pair: core 0 drives the DMA, core 1 is a Snitch core with
-# the 4-lane Spatz vector unit and its VLSU ports into the TCDM. Base as on
-# GVSoC's Spatz board, matching runtime/spatz/link.ld.
+# The Spatz cluster: core 0 drives the DMA, cores 1..8 are Snitch cores each
+# with a 4-lane Spatz vector unit and its VLSU ports into the TCDM.
+#
+# GVSoC's own Spatz board builds two cores, which made this cluster one compute
+# core against the Snitch cluster's eight -- an 8x handicap that had nothing to
+# do with either core's throughput. Both clusters now have eight compute cores
+# plus a DMA core, so a difference between them is a difference in what a core
+# does per cycle. Base as on GVSoC's Spatz board, matching runtime/spatz/link.ld.
 SPATZ_CLUSTER = Cluster(
     name='spatz',
     base=0x0010_0000,
-    nb_core=2,
+    nb_core=9,
     use_spatz=True,
     core_type='accurate',   # ignored: a Spatz cluster always uses SnitchFast
     isa='rv32imfdcav',

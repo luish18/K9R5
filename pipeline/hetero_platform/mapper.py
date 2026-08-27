@@ -38,26 +38,33 @@ from .engines import ClusterEngine, working_set_bytes
 
 # MACs per cycle, per engine and operator class.
 #
-# cva6/spatz come straight from results/: e.g. GEMM/Regular is 32x32x32 =
-# 32768 MACs in 489.0k cycles on the CVA6 (0.067 MAC/cycle) and 60.9k on Spatz
-# (0.538). snitch is the single-core Xssr/Xfrep rate (32768 / 43.5k = 0.753)
-# times the 8 compute cores of the cluster; make mesh-test measures 7.3k cycles
-# for the same shape, i.e. 4.5 MAC/cycle, which is what is used here.
+# The two cluster rows are measured by `make mesh-test`, which runs exactly the
+# configuration this model is predicting: eight compute cores, operands staged
+# into TCDM, on the SoC. A rate is that benchmark's MAC count over its measured
+# cycles, so it already carries the in-cluster overhead at that problem size;
+# OFFLOAD_FIXED below covers the host-side round trip on top.
+#
+#   GEMM/MatMul  32x32x32          =  32,768 MACs
+#   Conv2d       4x16x16 -> 8x3x3  =  56,448 MACs
+#
+# The cva6 row comes from results/, where the same shapes were measured on the
+# standalone board.
+#
+# Both clusters have eight compute cores, so these are like-for-like. Spatz
+# leads on all three because its kernels vectorize the output columns -- see
+# runtime/spatz/kernels/gemm_fp32_rvv.c for why that matters so much.
 RATES: Dict[str, Dict[str, float]] = {
     "cva6": {"Gemm": 0.067, "MatMul": 0.075, "Conv": 0.070, "_default": 0.070},
-    "snitch": {"Gemm": 4.50, "MatMul": 4.07, "Conv": 1.60, "_default": 1.60},
-    "spatz": {"Gemm": 0.54, "MatMul": 0.57, "Conv": 0.16, "_default": 0.16},
+    "snitch": {"Gemm": 4.52, "MatMul": 4.07, "Conv": 0.59, "_default": 0.59},
+    "spatz": {"Gemm": 11.91, "MatMul": 16.79, "Conv": 0.65, "_default": 0.65},
 }
 
-# Cycles a job costs before any arithmetic. Measured with make mesh-test: the
-# Snitch cluster reports ~7.3k cycles for a 32x32x32 GEMM whose arithmetic
-# alone is ~7.3k at the rate above, so the fixed part is dominated by staging
-# and is charged per byte below; this is the part that does not scale.
+# Cycles a job costs before any arithmetic: the mailbox write, the doorbell,
+# waking the control core, and the completion handshake. Charged per offload so
+# a node too small to be worth shipping stays on the host.
 OFFLOAD_FIXED = {"cva6": 0, "snitch": 1200, "spatz": 1200}
 
-# Cycles per byte staged into TCDM and back, from the same measurements
-# (Conv2d 4x16x16 stages ~11.5 KiB and the difference between its staged and
-# unstaged runs is dominated by the transfer).
+# Cycles per byte staged into TCDM and back, from the same measurements.
 OFFLOAD_PER_BYTE = {"cva6": 0.0, "snitch": 0.10, "spatz": 0.10}
 
 

@@ -6,26 +6,26 @@
       {
         "node": "",
         "op": "Gemm",
-        "engine": "snitch"
+        "engine": "spatz"
       }
     ]
   },
   "result": {
     "status": "ok",
-    "wall_s": 1.3,
+    "wall_s": 0.9,
     "nodes": [
       {
         "node": 0,
         "op": "Gemm",
-        "engine": "snitch",
-        "cycles": 11647
+        "engine": "spatz",
+        "cycles": 7885
       }
     ],
     "per_engine_cycles": {
-      "snitch": 11647
+      "spatz": 7885
     },
     "waits": [],
-    "cycles": 13155,
+    "cycles": 9377,
     "errors": 0,
     "outputs": 1024,
     "maxdiff": 2e-06,
@@ -33,21 +33,21 @@
     "caches": [
       {
         "cache": "icache",
-        "accesses": 6148,
+        "accesses": 5360,
         "misses": 59,
         "latency_cycles": 6752
       },
       {
         "cache": "dcache",
-        "accesses": 3391,
+        "accesses": 3389,
         "misses": 823,
-        "latency_cycles": 60701
+        "latency_cycles": 60699
       },
       {
         "cache": "l2",
-        "accesses": 989,
+        "accesses": 987,
         "misses": 337,
-        "latency_cycles": 53939
+        "latency_cycles": 53919
       }
     ]
   }

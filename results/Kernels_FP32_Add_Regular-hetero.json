@@ -12,7 +12,7 @@
   },
   "result": {
     "status": "ok",
-    "wall_s": 1.2,
+    "wall_s": 1.0,
     "nodes": [
       {
         "node": 0,
@@ -35,7 +35,7 @@
         "cache": "icache",
         "accesses": 620,
         "misses": 52,
-        "latency_cycles": 5909
+        "latency_cycles": 5910
       },
       {
         "cache": "dcache",
@@ -47,7 +47,7 @@
         "cache": "l2",
         "accesses": 403,
         "misses": 98,
-        "latency_cycles": 21669
+        "latency_cycles": 21670
       }
     ]
   }

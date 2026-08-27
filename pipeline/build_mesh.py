@@ -102,8 +102,13 @@ SPATZ = Image(
     crt0=MESH / "crt0_cluster.S",
     defines=["-DHES_CLUSTER_SPATZ"],
     # -ffast-math is what lets GCC vectorize the FP reductions in the Generic
-    # kernels to RVV; without it the Spatz vector unit sits idle.
+    # kernels it still uses; the hand-written ones below do not need it.
     kernel_flags=["-O3", "-ffast-math"],
+    # GEMM and MatMul are written against RVV directly: left to the
+    # autovectorizer GCC picks the reduction axis, which costs a strided load
+    # and a horizontal reduction per output element.
+    kernel_srcs=sorted((RUNTIME / "spatz" / "kernels").glob("*.c")),
+    kernel_overrides=["MatMul_fp32_fp32_fp32", "Gemm_fp32_fp32_fp32_fp32"],
 )
 
 IMAGES = {img.name: img for img in (HOST, SNITCH, SPATZ)}

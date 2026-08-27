@@ -6,26 +6,26 @@
       {
         "node": "matmul_node",
         "op": "MatMul",
-        "engine": "snitch"
+        "engine": "spatz"
       }
     ]
   },
   "result": {
     "status": "ok",
-    "wall_s": 1.2,
+    "wall_s": 1.0,
     "nodes": [
       {
         "node": 0,
         "op": "MatMul",
-        "engine": "snitch",
-        "cycles": 7591
+        "engine": "spatz",
+        "cycles": 6117
       }
     ],
     "per_engine_cycles": {
-      "snitch": 7591
+      "spatz": 6117
     },
     "waits": [],
-    "cycles": 8977,
+    "cycles": 7502,
     "errors": 0,
     "outputs": 256,
     "maxdiff": 0.0,
@@ -33,9 +33,9 @@
     "caches": [
       {
         "cache": "icache",
-        "accesses": 3638,
+        "accesses": 3244,
         "misses": 58,
-        "latency_cycles": 6601
+        "latency_cycles": 6602
       },
       {
         "cache": "dcache",
@@ -47,7 +47,7 @@
         "cache": "l2",
         "accesses": 1190,
         "misses": 306,
-        "latency_cycles": 56548
+        "latency_cycles": 56549
       }
     ]
   }

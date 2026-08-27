@@ -11,13 +11,13 @@
       {
         "node": "0Conv",
         "op": "Conv",
-        "engine": "snitch"
+        "engine": "spatz"
       }
     ]
   },
   "result": {
     "status": "ok",
-    "wall_s": 1.9,
+    "wall_s": 1.4,
     "nodes": [
       {
         "node": 0,
@@ -28,16 +28,16 @@
       {
         "node": 1,
         "op": "Conv",
-        "engine": "snitch",
-        "cycles": 284288
+        "engine": "spatz",
+        "cycles": 117456
       }
     ],
     "per_engine_cycles": {
       "cva6": 128075,
-      "snitch": 284288
+      "spatz": 117456
     },
     "waits": [],
-    "cycles": 415421,
+    "cycles": 248588,
     "errors": 0,
     "outputs": 840,
     "maxdiff": 0.0,
@@ -45,21 +45,21 @@
     "caches": [
       {
         "cache": "icache",
-        "accesses": 130248,
+        "accesses": 76279,
         "misses": 70,
-        "latency_cycles": 7950
+        "latency_cycles": 7942
       },
       {
         "cache": "dcache",
         "accesses": 41340,
         "misses": 21417,
-        "latency_cycles": 203208
+        "latency_cycles": 203047
       },
       {
         "cache": "l2",
         "accesses": 21650,
         "misses": 993,
-        "latency_cycles": 517090
+        "latency_cycles": 517085
       }
     ]
   }
