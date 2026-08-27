@@ -103,9 +103,17 @@ CORES = {
         march="rv32imafd_zicsr_zifencei_v",
         mabi="ilp32d",
         linker=RUNTIME / "spatz" / "link.ld",
-        # Autovectorize kernels to RVV. -ffast-math is required for GCC to
-        # vectorize FP reductions (dot products / GEMM inner loops).
+        # Autovectorize the kernels Spatz does not override. -ffast-math is
+        # required for GCC to vectorize FP reductions (dot products / GEMM
+        # inner loops).
         kernel_flags=["-O3", "-ffast-math"],
+        # MatMul and GEMM are written against RVV by hand. Left to the
+        # autovectorizer, GCC picks the reduction axis of the dot product,
+        # which costs a strided load of B and a horizontal reduction for every
+        # output element; the microkernel vectorizes the output columns
+        # instead (runtime/spatz/kernels/gemm_fp32_rvv.c).
+        kernel_srcs=sorted((RUNTIME / "spatz" / "kernels").glob("*.c")),
+        kernel_overrides=["MatMul_fp32_fp32_fp32", "Gemm_fp32_fp32_fp32_fp32"],
     ),
 }
 

@@ -60,12 +60,12 @@
       "core": "spatz",
       "target": "spatz_real",
       "status": "ok",
-      "cycles": 57636,
+      "cycles": 11208,
       "instret": null,
       "errors": 0,
       "outputs": 1024,
-      "maxdiff": 4e-06,
-      "sim_wall_s": 0.9
+      "maxdiff": 0.0,
+      "sim_wall_s": 0.8
     }
   ]
 }
