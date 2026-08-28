@@ -1,6 +1,7 @@
 {
   "op": "Kernels_FP32_MatMul",
   "memory": "ideal",
+  "spatz_kernels": "tuned",
   "results": [
     {
       "core": "cva6",
@@ -11,7 +12,7 @@
       "errors": 0,
       "outputs": 256,
       "maxdiff": 0.0,
-      "sim_wall_s": 0.2
+      "sim_wall_s": 0.3
     },
     {
       "core": "snitch",
@@ -22,18 +23,18 @@
       "errors": 0,
       "outputs": 256,
       "maxdiff": 0.0,
-      "sim_wall_s": 0.9
+      "sim_wall_s": 1.3
     },
     {
       "core": "spatz",
       "target": "spatz",
       "status": "ok",
-      "cycles": 5043,
+      "cycles": 5015,
       "instret": null,
       "errors": 0,
       "outputs": 256,
       "maxdiff": 0.0,
-      "sim_wall_s": 0.8
+      "sim_wall_s": 1.2
     }
   ]
 }

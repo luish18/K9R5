@@ -13,10 +13,10 @@ ONNX op + inputs  ──Deeploy──►  C code  ──riscv-gcc──►  3 EL
 | spatz  | Snitch + Spatz vector unit (4 lanes), RVV kernels    | `spatz_real` (in `targets/`) | rv32imafd + V |
 
 Each core runs the best code the pipeline can give it, not the same code: CVA6
-scalar `-O3`, Snitch's FP kernels hand-written against its two custom extensions,
-Spatz's MatMul and GEMM hand-written against RVV and the rest autovectorized —
-see [The Snitch FP extensions](#the-snitch-fp-extensions-xssr--xfrep) and
-[The Spatz RVV kernels](#the-spatz-rvv-kernels-matmul--gemm).
+scalar `-O3`, and both accelerator cores' FP kernels hand-written against what
+they actually have — Snitch against its two custom extensions, Spatz against
+RVV. See [The Snitch FP extensions](#the-snitch-fp-extensions-xssr--xfrep) and
+[The Spatz RVV kernels](#the-spatz-rvv-kernels).
 
 **The memory system is simulated,** not assumed away: cache misses, DRAM latency and
 refill bandwidth all land in the cycle counts. `--memory ideal` switches back to the
@@ -69,6 +69,14 @@ Bring your own ONNX op (expected outputs computed with onnxruntime):
 Output: a per-core table (cycles, speedup vs CVA6, numerical error vs the ONNX
 reference), the cache counters behind it, and the same numbers as JSON in `results/`.
 
+Swap Spatz's hand-written kernels for whatever GCC autovectorizes:
+
+```bash
+.venv/bin/python pipeline/run.py <op> --spatz-kernels autovec
+```
+
+Results for the non-default choice land in `results/<op>-spatz-autovec.json`.
+
 Compare the two memory models on the same op:
 
 ```bash
@@ -115,33 +123,28 @@ row is verified against the ONNX reference and reproduced by
 
 | operator | shape | cva6 | snitch | spatz |
 |----------|-------|------|--------|-------|
-| Add                | 64 × fp32, elementwise                       | **863**  | 1053 (0.8×)        | 1035 (0.8×)       |
-| MatMul             | 2 × (16×32 · 32×8) fp32                      | 119.0k   | 12.6k (9.4×)       | **7.0k (16.9×)**  |
-| MatMul (custom op) | 32×32×32 fp32                                | 477.5k   | 43.1k (11.1×)      | **11.2k (42.6×)** |
-| GEMM               | 32×32×32 fp32 + bias                         | 489.0k   | 43.5k (11.2×)      | **13.5k (36.3×)** |
-| GEMM (int8)        | 32×32×32, s8·s8 → s32                        | 575.9k   | 451.7k (1.3×)      | **84.1k (6.8×)**  |
-| Conv2D + bias      | 2×64×32 fp32, 4 filters 2×8×8, stride 2×4    | 1.86M    | **173.9k (10.7×)** | 457.0k (4.1×)     |
-| Softmax            | 512 fp32, 32 rows of 16                      | 36.5k    | 51.0k (0.7×)       | **32.5k (1.1×)**  |
+| Add                | 64 × fp32, elementwise                       | **863**  | 1053 (0.8×)        | 1035 (0.8×)      |
+| MatMul             | 2 × (16×32 · 32×8) fp32                      | 119.0k   | 12.6k (9.4×)       | **6.8k (17.5×)** |
+| MatMul (custom op) | 32×32×32 fp32                                | 477.5k   | 43.1k (11.1×)      | **7.5k (63.3×)** |
+| GEMM               | 32×32×32 fp32 + bias                         | 489.0k   | 43.5k (11.2×)      | **8.4k (58.5×)** |
+| GEMM (int8)        | 32×32×32, s8·s8 → s32                        | 575.9k   | 451.7k (1.3×)      | **84.1k (6.8×)** |
+| Conv2D + bias      | 2×64×32 fp32, 4 filters 2×8×8, stride 2×4    | 1.86M    | **173.9k (10.7×)** | 457.0k (4.1×)    |
+| Softmax            | 512 fp32, 32 rows of 16                      | 36.5k    | 51.0k (0.7×)       | **32.5k (1.1×)** |
 
 Reading it:
 
-- **Spatz takes the matmul family**, by 2–4× over Snitch, because its kernels
-  vectorize the *output columns*: B is read unit-stride, A arrives as a scalar
-  broadcast, and the accumulator stays in a vector register with no reduction
-  at all — see [The Spatz RVV kernels](#the-spatz-rvv-kernels-matmul--gemm).
-  Four lanes beat one FPU once the loop nest is the right way round.
-- **Snitch keeps Conv2D**, and that row is a software gap rather than a
-  hardware one: Snitch has a hand-written Xssr/Xfrep Conv2d and Spatz does not,
-  so its Conv is still whatever the autovectorizer emits. The three rows where
-  both cores have a hand-written kernel all go to Spatz.
-- **Spatz takes int8 GEMM** by 5.4× over Snitch, but not because it prefers
-  integers — it is 6.3× *slower* on int8 than on its own fp32 GEMM. What opens
-  the gap is Snitch collapsing: Xssr feeds the FP register file and Xfrep
-  replays FP instructions, so neither applies to an integer reduction and the
-  core falls back to being a small scalar integer core. That is a 10× fall
-  against its own fp32 number, against Spatz's 6.3×. Neither core has a
-  hand-written int8 kernel, so this row is generic C on both and 84.1k is not
-  a ceiling.
+- **Spatz takes every fp32 matmul-shaped op**, by 17-63× over CVA6 and 2-6×
+  over Snitch, once its kernels are hand-written against RVV rather than
+  autovectorized — see [The Spatz RVV kernels](#the-spatz-rvv-kernels). While
+  Spatz ran compiler output this table had Snitch ahead on all of them.
+- **Snitch still takes Conv2D**, and its extensions are what put it 10.7× over
+  CVA6 everywhere: Xssr removes the loads and the address arithmetic and Xfrep
+  removes the loop, which leaves an FMA rate the stream bandwidth sets — see
+  [The Snitch FP extensions](#the-snitch-fp-extensions-xssr--xfrep). Spatz has
+  no hand-written convolution yet, which is the obvious next kernel.
+- **Spatz takes int8 GEMM**, by 5.4× over Snitch: SSR feeds the FP regfile and
+  FREP replays FP instructions, so neither helps an integer reduction, while
+  RVV vectorizes it directly.
 - **Softmax is `expf`-bound** on all three, so they land within 1.6× of each
   other and no amount of streaming or vectorizing moves it. Snitch is last
   because the libm code is scalar work on its small integer core, and FREP
@@ -170,7 +173,7 @@ pipeline/make_op.py    wrap an ONNX model + inputs into a pipeline op directory
 runtime/               bare-metal glue: crt0, semihosting, linker scripts, bench main
 runtime/snitch/snitch_ssr.h    Xssr/Xfrep intrinsics as raw instruction encodings
 runtime/snitch/kernels/        the FP kernels Snitch overrides (MatMul/GEMM/Conv2d)
-runtime/spatz/kernels/         the RVV kernels Spatz overrides (MatMul/GEMM)
+runtime/spatz/kernels/         the FP kernels Spatz overrides, hand-written RVV
 runtime/tests/         standalone bare-metal checks (`make ssr-test` runs the SSR ones)
 targets/*_real.py      GVSoC targets with the memory system modelled (the default)
 targets/cva6_ideal.py  GVSoC target with zero-latency memory (--memory ideal)
@@ -296,12 +299,11 @@ Snitch cycles for the timed op, everything else unchanged:
 | MatMul                 | 52.7k     | 12.6k        | 4.2x   |
 | mymatmul (32×32×32)    | 206k      | 43.1k        | 4.8x   |
 
-That is 4–6× over Snitch's own scalar FP, and it is what makes a single-issue
-core with one FPU competitive with a 4-lane vector unit at all. It is no longer
-enough to lead it: against the Spatz RVV kernels below, Snitch keeps Conv2D
-(174k vs 457k, the one op Spatz has no hand-written kernel for) and loses the
-other three — GEMM 43.5k vs 13.5k, MatMul 12.6k vs 7.0k, mymatmul 43.1k vs
-11.2k.
+which was enough to put one Snitch core ahead of the 4-lane Spatz on all four
+ops while Spatz ran compiler output. It now holds only on Conv2D (174k vs
+457k), the one op Spatz has no hand-written kernel for; on the MatMul and GEMM
+shapes, where both cores' kernels are hand-written, Spatz is 5-8x ahead — see
+[The Spatz RVV kernels](#the-spatz-rvv-kernels).
 
 Three ops in the baseline are untouched, and none of them can use the
 extensions:
@@ -314,56 +316,44 @@ extensions:
 - **Add** is emitted inline into the generated `Network.c` by Deeploy instead of
   being called as a kernel, so there is no function to override.
 
-## The Spatz RVV kernels (MatMul / GEMM)
+## The Spatz RVV kernels
 
-Spatz is a 4-lane vector unit, so it should beat a single-FPU scalar core at
-dense matrix work. Left to the autovectorizer it did not, and the reason was
-the loop nest rather than the hardware.
+Spatz used to run whatever GCC autovectorized out of the Deeploy sources, and
+that cost about 5x. GCC vectorizes the innermost loop, which for a matmul is
+the dot product, and that shape is wrong for this machine twice over: it loads
+`B` with `vlse32.v` down a column — a strided gather whose stride is a multiple
+of the TCDM bank interleave for every power-of-two row length, so the elements
+serialize onto one bank — and it runs a `vfredusum` reduction per output
+element, the one vector operation whose cost does not amortize over the vector
+length.
 
-Handed the generic C, GCC vectorizes the **reduction axis** — the `k` loop of
-the dot product. That costs three things for *every output element*:
+[`runtime/spatz/kernels/`](runtime/spatz/kernels) keeps the accumulator in a
+vector register across `k` and broadcasts the scalar `A` element instead:
 
-```
-vlse32.v      strided load of B, one element per row, scattered across
-              the TCDM banks instead of a unit-stride burst
-vfmacc.vv     the actual work
-vfredusum.vs  a horizontal tree reduction, serializing the lanes that
-              were just used in parallel
-vfmv.f.s      extract to scalar, and back to scalar code
-```
-
-which measured 0.54 MAC/cycle on a 32×32×32 GEMM — about an eighth of what four
-lanes can do, while Snitch was running at ~75% of its single FPU's peak. The
-comparison was between a tuned kernel and a compiler's guess.
-
-[`runtime/spatz/kernels/gemm_fp32_rvv.c`](runtime/spatz/kernels/gemm_fp32_rvv.c)
-vectorizes the **output columns** instead:
-
-```
-vle32.v       B[k][j..j+vl], unit stride
-vfmacc.vf     A[i][k] broadcast as a scalar against it
+```c
+acc[r] = vfmacc_vf(acc[r], A[i+r][k], B[k][j..j+vl], vl);
 ```
 
-The accumulator lives in a vector register for the whole `k` loop and is stored
-once — there is no reduction at all, and nothing but `vle32.v` and `vfmacc.vf`
-in the inner loop. Rows are unrolled by four so each load of B feeds four FMAs
-rather than one, which is what moves the kernel off being load-bound; the four
-accumulators are independent, which also covers the FPU latency.
+Every load is then unit-stride, no reduction is executed at all, and four rows
+of `A` share one `B` load. It runs at `LMUL=4`, which is worth 1.8x on its own:
+a back-to-back `vfmacc` loop with every operand already in the vector register
+file sustains 0.180 cycles/element at `LMUL=1` against 0.128 at `LMUL=4`, so a
+third of the peak goes to issue overhead before the kernel touches memory.
 
-| op                  | autovectorized | RVV microkernel |       |
-|---------------------|----------------|-----------------|-------|
-| GEMM/Regular        | 60.9k          | 13.5k           | 4.5×  |
-| MatMul              | 15.8k          | 7.0k            | 2.2×  |
-| mymatmul (32×32×32) | 57.6k          | 11.2k           | 5.1×  |
+### What it buys
 
-Transposed operands make B's row stride stop being `O`, which is the unit-stride
-property the kernel is built on, so those fall back to the generic version — the
-same split the Snitch kernels make. MatMul keeps the generic reduction order and
-starts its accumulator at zero, so it stays bit-identical to the scalar kernel;
-GEMM starts at C instead of adding C at the end, which can move the last bit.
+Spatz cycles for the timed op, everything else unchanged:
 
-Conv2D has no hand-written Spatz kernel and is still autovectorized, which is
-why it is the one row in the results table that Snitch still takes.
+| op                     | autovectorized | hand-written RVV |        |
+|------------------------|----------------|------------------|--------|
+| MatMul                 | 15.8k          | 6.8k             | 2.3x   |
+| mymatmul (32x32x32)    | 57.6k          | 7.5k             | 7.6x   |
+| GEMM/Regular           | 60.9k          | 8.4k             | 7.3x   |
+
+Transposed operands break the unit-stride `B` load and fall back to the Deeploy
+kernel, which stays reachable as `<name>_generic` exactly as it does for
+Snitch. Conv2D is untouched and still autovectorized, which is why Snitch keeps
+that row.
 
 ## The memory system
 
@@ -418,14 +408,14 @@ covers the timed op alone.
 
 Same binaries, same ops, `--memory real` against `--memory ideal`:
 
-| op                     | cva6                | snitch            | spatz               |
-|------------------------|---------------------|-------------------|---------------------|
-| Add/Regular            | 715 → 863 (+21%)    | 1053 (unchanged)  | 635 → 1035 (+63%)   |
-| Conv/Regular_2D_Bias   | 1.74M → 1.86M (+7%) | 174k (unchanged)  | 452k → 457k (+1%)   |
-| GEMM/Regular           | 473k → 489k (+3%)   | 43.5k (unchanged) | 11.4k → 13.5k (+18%)|
-| MatMul                 | 118k → 119k (+1%)   | 12.6k (unchanged) | 5.0k → 7.0k (+40%)  |
-| Softmax/Regular        | 34.1k → 36.5k (+7%) | 51.0k (unchanged) | 30.4k → 32.5k (+7%) |
-| Integer GEMM/Regular   | 575k → 576k (+0.2%) | 452k (unchanged)  | 82.4k → 84.1k (+2%) |
+| op                     | cva6                | snitch            | spatz              |
+|------------------------|---------------------|-------------------|--------------------|
+| Add/Regular            | 715 → 863 (+21%)    | 1053 (unchanged)  | 635 → 1035 (+63%)  |
+| Conv/Regular_2D_Bias   | 1.74M → 1.86M (+7%) | 174k (unchanged)  | 452k → 457k (+1%)  |
+| GEMM/Regular           | 473k → 489k (+3%)   | 43.5k (unchanged) | 6.36k → 8.36k (+31%)|
+| MatMul                 | 118k → 119k (+1%)   | 12.6k (unchanged) | 5.02k → 6.82k (+36%)|
+| Softmax/Regular        | 34.1k → 36.5k (+7%) | 51.0k (unchanged) | 30.4k → 32.5k (+7%)|
+| Integer GEMM/Regular   | 575k → 576k (+0.2%) | 452k (unchanged)  | 82.4k → 84.1k (+2%)|
 
 Snitch does not move because GVSoC's Snitch board already charged 100 cycles for HBM,
 which is the DRAM latency the three targets now share; its instruction fetches do pay
@@ -436,11 +426,12 @@ because its board mapped HBM with *zero* latency, so instruction fetches that mi
 the 8 KiB cluster cache used to refill for free. CVA6 moves because it had no memory
 system at all.
 
-Spatz's two hand-written kernels are the most memory-sensitive rows in the
-table (+18% and +40%, against +2% and +8% for the autovectorized versions they
-replaced) for the same reason Conv is on Snitch: the compute shrank by 4–5×
-while the instruction refills did not, so the same memory system now costs
-proportionally much more of a shorter run.
+Spatz's MatMul and GEMM rows moved from +2% to +31-36% when its kernels were
+hand-written: the compute shrank ~7x while the instruction refills did not, so
+the same memory system now costs proportionally far more. That is the same
+effect the Conv/`DRAM_LATENCY` note above describes for Snitch, and it is the
+general shape of the thing — the better the kernel, the larger the share of
+what remains that is memory.
 
 The single-op kernels stay compute-bound: their working sets are at most 128 KiB by
 construction (they have to fit the Snitch TCDM), and the operands are staged into
@@ -462,15 +453,13 @@ capacity misses, store traffic and instruction refills, not the cold start.
   `## GVSoC model fixes` below.
 - The cores do not run identical code, on purpose: the numbers are meant to be
   each core at its best, not a controlled experiment on one source. Snitch uses
-  Xssr/Xfrep, Spatz uses RVV, CVA6 runs the scalar kernels. "At its best" is
-  only as good as the kernel someone wrote, though, and the two cores are not
-  equally covered: Snitch has hand-written MatMul, GEMM and Conv2d, Spatz has
-  MatMul and GEMM. Conv2D on Spatz is still autovectorized, and that is the one
-  row it loses.
-- Multi-core parallelization is not used *here*: every number in the table above
-  is one core of each type. Both clusters are run with all eight compute cores
-  by the `hetero_soc` board, which is a separate target driven by
-  `pipeline/run_hetero.py`.
+  Xssr/Xfrep, Spatz uses hand-written RVV, CVA6 runs the scalar kernels.
+  `--spatz-kernels autovec` swaps Spatz's back for the compiler's output, which
+  is how the comparison below was measured.
+- Multi-core parallelization (8-core Snitch cluster, multi-CC Spatz) is still
+  not used: every number is one core of each type. That is the largest
+  remaining lever on the Snitch and Spatz numbers, and it needs a cluster
+  runtime (barriers, DMA, per-core tiling) rather than a kernel rewrite.
 
 ## GVSoC model fixes
 

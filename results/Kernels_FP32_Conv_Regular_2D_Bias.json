@@ -1,6 +1,7 @@
 {
   "op": "Kernels_FP32_Conv_Regular_2D_Bias",
   "memory": "real",
+  "spatz_kernels": "tuned",
   "results": [
     {
       "core": "cva6",
@@ -54,7 +55,7 @@
       "errors": 0,
       "outputs": 840,
       "maxdiff": 0.0,
-      "sim_wall_s": 1.1
+      "sim_wall_s": 1.7
     },
     {
       "core": "spatz",
@@ -65,7 +66,7 @@
       "errors": 0,
       "outputs": 840,
       "maxdiff": 0.0,
-      "sim_wall_s": 0.9
+      "sim_wall_s": 1.3
     }
   ]
 }
