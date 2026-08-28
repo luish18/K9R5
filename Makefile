@@ -7,9 +7,9 @@ ROOT := $(CURDIR)
 MEM ?= real
 # DEBUG=1 traces every command the pipeline runs and the files it generated
 DBG := $(if $(DEBUG),--debug)
-TARGETS := cva6 snitch spatz cva6_real snitch_real spatz_real
+TARGETS := cva6 snitch spatz cva6_real snitch_real spatz_real hetero_soc
 
-.PHONY: run gvsoc smoke ssr-test clean
+.PHONY: run gvsoc smoke ssr-test mesh-probe mesh-test hetero clean
 
 # Snitch bare-metal test build (the pipeline's snitch flags, minus the
 # generated network) used by the ssr-test target below.
@@ -50,6 +50,39 @@ ssr-test:
 	    --target-dir=$(ROOT)/targets --target=snitch_real --binary=$$t.elf run \
 	    2>/dev/null | grep -v '^WARNING'); \
 	done
+
+# hetero_soc board check: do the three cores boot in one simulation, and does
+# each level of the memory system answer at the cost hetero/system.py says?
+# Every cycle count the SoC produces later rests on this.
+mesh-probe:
+	$(PY) pipeline/gen_system_header.py --check
+	$(PY) pipeline/build_mesh.py --test mesh_probe
+	@cd work/mesh_probe && mkdir -p run && cd run && \
+	  HES_ELF_SNITCH=$(ROOT)/work/mesh_probe/snitch/snitch.elf \
+	  HES_ELF_SPATZ=$(ROOT)/work/mesh_probe/spatz/spatz.elf \
+	  PATH="$(ROOT)/.venv/bin:$$PATH" $(ROOT)/$(GVSOC) \
+	    --target-dir=$(ROOT)/targets --target=hetero_soc \
+	    --binary=$(ROOT)/work/mesh_probe/host/host.elf run 2>/dev/null | grep -v '^WARNING'
+
+# hetero_soc dispatch check: the host hands a GEMM, a MatMul and a Conv2d to
+# both clusters, in main memory and staged into TCDM, and compares every
+# output element against the scalar kernel run on its own core.
+mesh-test:
+	$(PY) pipeline/gen_system_header.py --check
+	$(PY) pipeline/build_mesh.py --test mesh_offload --cluster cluster_main.c \
+	  --host-extra hes_host.c
+	@cd work/mesh_offload && mkdir -p run && cd run && \
+	  HES_ELF_SNITCH=$(ROOT)/work/mesh_offload/snitch/snitch.elf \
+	  HES_ELF_SPATZ=$(ROOT)/work/mesh_offload/spatz/spatz.elf \
+	  PATH="$(ROOT)/.venv/bin:$$PATH" $(ROOT)/$(GVSOC) \
+	    --target-dir=$(ROOT)/targets --target=hetero_soc \
+	    --binary=$(ROOT)/work/mesh_offload/host/host.elf run 2>/dev/null | grep -v '^WARNING'
+
+# Run one op on the whole SoC, with Deeploy mapping each node to an engine.
+#   make hetero OP=Tests/Kernels/FP32/GEMM/Regular
+#   make hetero OP=... PIN=snitch      force one engine, for the comparison
+hetero:
+	$(PY) pipeline/run_hetero.py $(OP) $(if $(PIN),--pin $(PIN)) $(DBG)
 
 clean:
 	rm -rf work/*

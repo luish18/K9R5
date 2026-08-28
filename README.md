@@ -147,9 +147,16 @@ Reading it:
   RVV vectorizes it directly.
 - **Softmax is `expf`-bound** on all three, so they land within 1.6× of each
   other and no amount of streaming or vectorizing moves it. Snitch is last
-  because the libm code is scalar work on its small integer core.
+  because the libm code is scalar work on its small integer core, and FREP
+  replays FP instructions from a 16-entry buffer, not a libm call.
 - **Add is too small to say anything** — 64 elements, where the result is
   dominated by call and loop overhead rather than the 64 additions.
+
+The dividing line between the two accelerated cores is not integer versus
+float. It is whether the work reduces to a dense FP multiply-accumulate loop
+that Snitch's sequencer can replay: if it does, Snitch is competitive; if it
+does not — an integer reduction, a libm call — Spatz is the better cluster
+whatever the datatype.
 
 `--memory ideal` (zero-latency memory, `results/<op>-ideal.json`) keeps the same
 ordering everywhere except Add, where Spatz's 635 cycles edge out CVA6's 715
@@ -186,10 +193,13 @@ results/               metrics JSON per op — committed as the verified baselin
 1. **Deeploy codegen** — `generateNetwork.py -p Generic` turns the ONNX op into
    `Network.c` (kernel calls + weights) plus `testinputs.h` / `testoutputs.h`.
 2. **Per-core build** — the same generated C is cross-compiled three times.
-   Kernels for Spatz are compiled `-O3 -ffast-math` so GCC autovectorizes them to
-   RVV; glue code stays scalar. Snitch replaces three of the Deeploy kernels
-   with SSR/FREP versions of its own (below); the Deeploy ones stay linked in as
-   `<name>_generic` and still run the shapes the rewrite does not cover.
+   Snitch replaces three of the Deeploy kernels with SSR/FREP versions of its
+   own and Spatz replaces two with RVV versions (both below); the Deeploy ones
+   stay linked in as `<name>_generic` and still run the shapes the rewrites do
+   not cover. Spatz's remaining kernels are compiled `-O3 -ffast-math` so GCC
+   autovectorizes them; glue code stays scalar on both, because the Spatz
+   `-march` carries `v` and GCC will otherwise emit RVV for ordinary control
+   loops.
    Snitch/Spatz builds avoid the C extension because
    the GVSoC Snitch model executes compressed FP loads on the integer core,
    diverging from the decoupled FP subsystem.
@@ -437,7 +447,7 @@ capacity misses, store traffic and instruction refills, not the cold start.
 - Ops must fit in 128 KiB TCDM (data + heap + 8 KiB stack) for Snitch/Spatz.
 - `minstret` is not implemented by these GVSoC core models; instruction counts
   are reported when available.
-- Spatz executes whatever RVV GCC emits; instructions the GVSoC model does not
+- Spatz executes whatever RVV reaches it; instructions the GVSoC model does not
   implement trap and are reported as a failed run rather than a wrong number.
   Four gaps hit by autovectorized code are fixed in `deps/patches/` — see
   `## GVSoC model fixes` below.

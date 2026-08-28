@@ -1,0 +1,54 @@
+{
+  "op": "Kernels_FP32_GEMM_Regular",
+  "mapping": {
+    "pin": "spatz",
+    "nodes": [
+      {
+        "node": "",
+        "op": "Gemm",
+        "engine": "spatz"
+      }
+    ]
+  },
+  "result": {
+    "status": "ok",
+    "wall_s": 0.9,
+    "nodes": [
+      {
+        "node": 0,
+        "op": "Gemm",
+        "engine": "spatz",
+        "cycles": 7885
+      }
+    ],
+    "per_engine_cycles": {
+      "spatz": 7885
+    },
+    "waits": [],
+    "cycles": 9377,
+    "errors": 0,
+    "outputs": 1024,
+    "maxdiff": 2e-06,
+    "offload_failures": 0,
+    "caches": [
+      {
+        "cache": "icache",
+        "accesses": 5360,
+        "misses": 59,
+        "latency_cycles": 6752
+      },
+      {
+        "cache": "dcache",
+        "accesses": 3389,
+        "misses": 823,
+        "latency_cycles": 60699
+      },
+      {
+        "cache": "l2",
+        "accesses": 987,
+        "misses": 337,
+        "latency_cycles": 53919
+      }
+    ]
+  }
+}

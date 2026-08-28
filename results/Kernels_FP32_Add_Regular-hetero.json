@@ -1,0 +1,54 @@
+{
+  "op": "Kernels_FP32_Add_Regular",
+  "mapping": {
+    "pin": null,
+    "nodes": [
+      {
+        "node": "Add_0",
+        "op": "Add",
+        "engine": "cva6"
+      }
+    ]
+  },
+  "result": {
+    "status": "ok",
+    "wall_s": 1.0,
+    "nodes": [
+      {
+        "node": 0,
+        "op": "Add",
+        "engine": "cva6",
+        "cycles": 871
+      }
+    ],
+    "per_engine_cycles": {
+      "cva6": 871
+    },
+    "waits": [],
+    "cycles": 2469,
+    "errors": 0,
+    "outputs": 64,
+    "maxdiff": 0.0,
+    "offload_failures": 0,
+    "caches": [
+      {
+        "cache": "icache",
+        "accesses": 620,
+        "misses": 52,
+        "latency_cycles": 5910
+      },
+      {
+        "cache": "dcache",
+        "accesses": 721,
+        "misses": 262,
+        "latency_cycles": 7021
+      },
+      {
+        "cache": "l2",
+        "accesses": 403,
+        "misses": 98,
+        "latency_cycles": 21670
+      }
+    ]
+  }
+}

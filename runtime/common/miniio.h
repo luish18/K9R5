@@ -27,4 +27,18 @@ static inline void print_i64(int64_t v) {
   print_u64((uint64_t)v);
 }
 
+static inline void print_hex(uint64_t v) {
+  char buf[17];
+  int i = 16;
+  buf[i] = '\0';
+  if (v == 0)
+    buf[--i] = '0';
+  while (v) {
+    unsigned d = (unsigned)(v & 0xf);
+    buf[--i] = (char)(d < 10 ? '0' + d : 'a' + d - 10);
+    v >>= 4;
+  }
+  sh_puts(&buf[i]);
+}
+
 #endif /* MINIIO_H */

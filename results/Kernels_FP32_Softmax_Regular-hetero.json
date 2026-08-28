@@ -1,0 +1,54 @@
+{
+  "op": "Kernels_FP32_Softmax_Regular",
+  "mapping": {
+    "pin": null,
+    "nodes": [
+      {
+        "node": "softmax_node",
+        "op": "Softmax",
+        "engine": "cva6"
+      }
+    ]
+  },
+  "result": {
+    "status": "ok",
+    "wall_s": 1.2,
+    "nodes": [
+      {
+        "node": 0,
+        "op": "Softmax",
+        "engine": "cva6",
+        "cycles": 36176
+      }
+    ],
+    "per_engine_cycles": {
+      "cva6": 36176
+    },
+    "waits": [],
+    "cycles": 37695,
+    "errors": 0,
+    "outputs": 512,
+    "maxdiff": 0.0,
+    "offload_failures": 0,
+    "caches": [
+      {
+        "cache": "icache",
+        "accesses": 5514,
+        "misses": 56,
+        "latency_cycles": 6359
+      },
+      {
+        "cache": "dcache",
+        "accesses": 7994,
+        "misses": 639,
+        "latency_cycles": 36856
+      },
+      {
+        "cache": "l2",
+        "accesses": 1692,
+        "misses": 212,
+        "latency_cycles": 47677
+      }
+    ]
+  }
+}
