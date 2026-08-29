@@ -18,14 +18,14 @@
         "node": 0,
         "op": "Gemm",
         "engine": "spatz",
-        "cycles": 7885
+        "cycles": 6612
       }
     ],
     "per_engine_cycles": {
-      "spatz": 7885
+      "spatz": 6612
     },
     "waits": [],
-    "cycles": 9377,
+    "cycles": 8104,
     "errors": 0,
     "outputs": 1024,
     "maxdiff": 2e-06,
@@ -33,7 +33,7 @@
     "caches": [
       {
         "cache": "icache",
-        "accesses": 5360,
+        "accesses": 4908,
         "misses": 59,
         "latency_cycles": 6752
       },

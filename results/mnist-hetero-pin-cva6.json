@@ -1,0 +1,640 @@
+{
+  "op": "mnist",
+  "mapping": {
+    "pin": "cva6",
+    "nodes": [
+      {
+        "node": "conv1",
+        "op": "Conv",
+        "engine": "cva6"
+      },
+      {
+        "node": "relu1",
+        "op": "Relu",
+        "engine": "cva6"
+      },
+      {
+        "node": "pool1",
+        "op": "MaxPool",
+        "engine": "cva6"
+      },
+      {
+        "node": "conv2",
+        "op": "Conv",
+        "engine": "cva6"
+      },
+      {
+        "node": "relu2",
+        "op": "Relu",
+        "engine": "cva6"
+      },
+      {
+        "node": "pool2",
+        "op": "MaxPool",
+        "engine": "cva6"
+      },
+      {
+        "node": "flatten",
+        "op": "Reshape",
+        "engine": "cva6"
+      },
+      {
+        "node": "fc1",
+        "op": "Gemm",
+        "engine": "cva6"
+      },
+      {
+        "node": "relu3",
+        "op": "Relu",
+        "engine": "cva6"
+      },
+      {
+        "node": "fc2",
+        "op": "Gemm",
+        "engine": "cva6"
+      },
+      {
+        "node": "softmax",
+        "op": "Softmax",
+        "engine": "cva6"
+      }
+    ]
+  },
+  "result": {
+    "status": "ok",
+    "wall_s": 2.5,
+    "nodes": [
+      {
+        "node": 0,
+        "op": "Conv",
+        "engine": "cva6",
+        "cycles": 1017151
+      },
+      {
+        "node": 1,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 67508
+      },
+      {
+        "node": 2,
+        "op": "MaxPool",
+        "engine": "cva6",
+        "cycles": 134961
+      },
+      {
+        "node": 3,
+        "op": "Conv",
+        "engine": "cva6",
+        "cycles": 2569158
+      },
+      {
+        "node": 4,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 24045
+      },
+      {
+        "node": 5,
+        "op": "MaxPool",
+        "engine": "cva6",
+        "cycles": 40916
+      },
+      {
+        "node": 6,
+        "op": "Reshape",
+        "engine": "cva6",
+        "cycles": 14
+      },
+      {
+        "node": 7,
+        "op": "Gemm",
+        "engine": "cva6",
+        "cycles": 427209
+      },
+      {
+        "node": 8,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 407
+      },
+      {
+        "node": 9,
+        "op": "Gemm",
+        "engine": "cva6",
+        "cycles": 6929
+      },
+      {
+        "node": 10,
+        "op": "Softmax",
+        "engine": "cva6",
+        "cycles": 2009
+      },
+      {
+        "node": 0,
+        "op": "Conv",
+        "engine": "cva6",
+        "cycles": 1015754
+      },
+      {
+        "node": 1,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 66770
+      },
+      {
+        "node": 2,
+        "op": "MaxPool",
+        "engine": "cva6",
+        "cycles": 134026
+      },
+      {
+        "node": 3,
+        "op": "Conv",
+        "engine": "cva6",
+        "cycles": 2561896
+      },
+      {
+        "node": 4,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 24054
+      },
+      {
+        "node": 5,
+        "op": "MaxPool",
+        "engine": "cva6",
+        "cycles": 40786
+      },
+      {
+        "node": 6,
+        "op": "Reshape",
+        "engine": "cva6",
+        "cycles": 14
+      },
+      {
+        "node": 7,
+        "op": "Gemm",
+        "engine": "cva6",
+        "cycles": 347469
+      },
+      {
+        "node": 8,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 406
+      },
+      {
+        "node": 9,
+        "op": "Gemm",
+        "engine": "cva6",
+        "cycles": 4936
+      },
+      {
+        "node": 10,
+        "op": "Softmax",
+        "engine": "cva6",
+        "cycles": 829
+      },
+      {
+        "node": 0,
+        "op": "Conv",
+        "engine": "cva6",
+        "cycles": 1015754
+      },
+      {
+        "node": 1,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 67245
+      },
+      {
+        "node": 2,
+        "op": "MaxPool",
+        "engine": "cva6",
+        "cycles": 134303
+      },
+      {
+        "node": 3,
+        "op": "Conv",
+        "engine": "cva6",
+        "cycles": 2561896
+      },
+      {
+        "node": 4,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 24105
+      },
+      {
+        "node": 5,
+        "op": "MaxPool",
+        "engine": "cva6",
+        "cycles": 40882
+      },
+      {
+        "node": 6,
+        "op": "Reshape",
+        "engine": "cva6",
+        "cycles": 14
+      },
+      {
+        "node": 7,
+        "op": "Gemm",
+        "engine": "cva6",
+        "cycles": 347469
+      },
+      {
+        "node": 8,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 406
+      },
+      {
+        "node": 9,
+        "op": "Gemm",
+        "engine": "cva6",
+        "cycles": 4936
+      },
+      {
+        "node": 10,
+        "op": "Softmax",
+        "engine": "cva6",
+        "cycles": 830
+      },
+      {
+        "node": 0,
+        "op": "Conv",
+        "engine": "cva6",
+        "cycles": 1015754
+      },
+      {
+        "node": 1,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 66676
+      },
+      {
+        "node": 2,
+        "op": "MaxPool",
+        "engine": "cva6",
+        "cycles": 133965
+      },
+      {
+        "node": 3,
+        "op": "Conv",
+        "engine": "cva6",
+        "cycles": 2561896
+      },
+      {
+        "node": 4,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 24049
+      },
+      {
+        "node": 5,
+        "op": "MaxPool",
+        "engine": "cva6",
+        "cycles": 40798
+      },
+      {
+        "node": 6,
+        "op": "Reshape",
+        "engine": "cva6",
+        "cycles": 14
+      },
+      {
+        "node": 7,
+        "op": "Gemm",
+        "engine": "cva6",
+        "cycles": 347469
+      },
+      {
+        "node": 8,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 404
+      },
+      {
+        "node": 9,
+        "op": "Gemm",
+        "engine": "cva6",
+        "cycles": 4936
+      },
+      {
+        "node": 10,
+        "op": "Softmax",
+        "engine": "cva6",
+        "cycles": 844
+      },
+      {
+        "node": 0,
+        "op": "Conv",
+        "engine": "cva6",
+        "cycles": 1015754
+      },
+      {
+        "node": 1,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 66893
+      },
+      {
+        "node": 2,
+        "op": "MaxPool",
+        "engine": "cva6",
+        "cycles": 134098
+      },
+      {
+        "node": 3,
+        "op": "Conv",
+        "engine": "cva6",
+        "cycles": 2561896
+      },
+      {
+        "node": 4,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 24040
+      },
+      {
+        "node": 5,
+        "op": "MaxPool",
+        "engine": "cva6",
+        "cycles": 40794
+      },
+      {
+        "node": 6,
+        "op": "Reshape",
+        "engine": "cva6",
+        "cycles": 14
+      },
+      {
+        "node": 7,
+        "op": "Gemm",
+        "engine": "cva6",
+        "cycles": 347469
+      },
+      {
+        "node": 8,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 403
+      },
+      {
+        "node": 9,
+        "op": "Gemm",
+        "engine": "cva6",
+        "cycles": 4936
+      },
+      {
+        "node": 10,
+        "op": "Softmax",
+        "engine": "cva6",
+        "cycles": 816
+      },
+      {
+        "node": 0,
+        "op": "Conv",
+        "engine": "cva6",
+        "cycles": 1015754
+      },
+      {
+        "node": 1,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 67176
+      },
+      {
+        "node": 2,
+        "op": "MaxPool",
+        "engine": "cva6",
+        "cycles": 134258
+      },
+      {
+        "node": 3,
+        "op": "Conv",
+        "engine": "cva6",
+        "cycles": 2561896
+      },
+      {
+        "node": 4,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 24091
+      },
+      {
+        "node": 5,
+        "op": "MaxPool",
+        "engine": "cva6",
+        "cycles": 40870
+      },
+      {
+        "node": 6,
+        "op": "Reshape",
+        "engine": "cva6",
+        "cycles": 14
+      },
+      {
+        "node": 7,
+        "op": "Gemm",
+        "engine": "cva6",
+        "cycles": 347469
+      },
+      {
+        "node": 8,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 403
+      },
+      {
+        "node": 9,
+        "op": "Gemm",
+        "engine": "cva6",
+        "cycles": 4936
+      },
+      {
+        "node": 10,
+        "op": "Softmax",
+        "engine": "cva6",
+        "cycles": 843
+      },
+      {
+        "node": 0,
+        "op": "Conv",
+        "engine": "cva6",
+        "cycles": 1015754
+      },
+      {
+        "node": 1,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 66859
+      },
+      {
+        "node": 2,
+        "op": "MaxPool",
+        "engine": "cva6",
+        "cycles": 134063
+      },
+      {
+        "node": 3,
+        "op": "Conv",
+        "engine": "cva6",
+        "cycles": 2561896
+      },
+      {
+        "node": 4,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 24046
+      },
+      {
+        "node": 5,
+        "op": "MaxPool",
+        "engine": "cva6",
+        "cycles": 40798
+      },
+      {
+        "node": 6,
+        "op": "Reshape",
+        "engine": "cva6",
+        "cycles": 14
+      },
+      {
+        "node": 7,
+        "op": "Gemm",
+        "engine": "cva6",
+        "cycles": 347469
+      },
+      {
+        "node": 8,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 406
+      },
+      {
+        "node": 9,
+        "op": "Gemm",
+        "engine": "cva6",
+        "cycles": 4936
+      },
+      {
+        "node": 10,
+        "op": "Softmax",
+        "engine": "cva6",
+        "cycles": 829
+      },
+      {
+        "node": 0,
+        "op": "Conv",
+        "engine": "cva6",
+        "cycles": 1015754
+      },
+      {
+        "node": 1,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 66940
+      },
+      {
+        "node": 2,
+        "op": "MaxPool",
+        "engine": "cva6",
+        "cycles": 134145
+      },
+      {
+        "node": 3,
+        "op": "Conv",
+        "engine": "cva6",
+        "cycles": 2561896
+      },
+      {
+        "node": 4,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 24094
+      },
+      {
+        "node": 5,
+        "op": "MaxPool",
+        "engine": "cva6",
+        "cycles": 40815
+      },
+      {
+        "node": 6,
+        "op": "Reshape",
+        "engine": "cva6",
+        "cycles": 14
+      },
+      {
+        "node": 7,
+        "op": "Gemm",
+        "engine": "cva6",
+        "cycles": 347469
+      },
+      {
+        "node": 8,
+        "op": "Relu",
+        "engine": "cva6",
+        "cycles": 404
+      },
+      {
+        "node": 9,
+        "op": "Gemm",
+        "engine": "cva6",
+        "cycles": 4936
+      },
+      {
+        "node": 10,
+        "op": "Softmax",
+        "engine": "cva6",
+        "cycles": 827
+      }
+    ],
+    "per_engine_cycles": {
+      "cva6": 33671079
+    },
+    "waits": [],
+    "log_tail": [
+      "[HES-PROG] sample=8/8 node=5 op=MaxPool engine=cva6 cycles=40815",
+      "[HES-PROG] sample=8/8 node=6 op=Reshape engine=cva6 cycles=14",
+      "[HES-PROG] sample=8/8 node=7 op=Gemm engine=cva6 cycles=347469",
+      "[HES-PROG] sample=8/8 node=8 op=Relu engine=cva6 cycles=404",
+      "[HES-PROG] sample=8/8 node=9 op=Gemm engine=cva6 cycles=4936",
+      "[HES-PROG] sample=8/8 node=10 op=Softmax engine=cva6 cycles=827",
+      "[HES-MNIST] images=8 correct=8 agree_with_onnx=8 cycles_total=33720608 cycles_per_image=4215076 offload_failures=0",
+      "[HES-MEM] cache=/soc/icache accesses=3553507 reads=3553507 writes=0 hits=3553406 misses=101 latency_cycles=11430",
+      "[HES-MEM] cache=/soc/dcache accesses=4718238 reads=4003913 writes=714325 hits=4481129 misses=237109 latency_cycles=6517856",
+      "[HES-MEM] cache=/soc/l2 accesses=829469 reads=115144 writes=714325 hits=827308 misses=2161 latency_cycles=8623123"
+    ],
+    "images": 8,
+    "correct": 8,
+    "agree_with_onnx": 8,
+    "cycles": 33720608,
+    "cycles_per_image": 4215076,
+    "accuracy": 1.0,
+    "offload_failures": 0,
+    "caches": [
+      {
+        "cache": "icache",
+        "accesses": 3553507,
+        "misses": 101,
+        "latency_cycles": 11430
+      },
+      {
+        "cache": "dcache",
+        "accesses": 4718238,
+        "misses": 237109,
+        "latency_cycles": 6517856
+      },
+      {
+        "cache": "l2",
+        "accesses": 829469,
+        "misses": 2161,
+        "latency_cycles": 8623123
+      }
+    ]
+  }
+}

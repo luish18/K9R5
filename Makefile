@@ -9,7 +9,7 @@ MEM ?= real
 DBG := $(if $(DEBUG),--debug)
 TARGETS := cva6 snitch spatz cva6_real snitch_real spatz_real hetero_soc
 
-.PHONY: run gvsoc smoke ssr-test mesh-probe mesh-test hetero clean
+.PHONY: run gvsoc smoke ssr-test mesh-probe mesh-test hetero mnist clean
 
 # Snitch bare-metal test build (the pipeline's snitch flags, minus the
 # generated network) used by the ssr-test target below.
@@ -83,6 +83,15 @@ mesh-test:
 #   make hetero OP=... PIN=snitch      force one engine, for the comparison
 hetero:
 	$(PY) pipeline/run_hetero.py $(OP) $(if $(PIN),--pin $(PIN)) $(DBG)
+
+# Train the MNIST CNN, export it, and classify the embedded test images on the
+# whole SoC.  make mnist IMAGES=16  runs fewer of them.
+# REUSE=1 keeps the committed network.onnx and only rebuilds the evaluation
+# set, which is what you want when changing IMAGES.
+IMAGES ?= 64
+mnist:
+	$(PY) pipeline/mnist.py --images $(IMAGES) $(if $(REUSE),--reuse)
+	$(PY) pipeline/run_hetero.py ops/mnist $(if $(PIN),--pin $(PIN)) $(DBG)
 
 clean:
 	rm -rf work/*

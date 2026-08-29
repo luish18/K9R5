@@ -41,6 +41,8 @@ PROG_RE = re.compile(r"\[HES-PROG\] sample=(\d+)/(\d+) node=(\d+) op=(\S+) "
 WAIT_RE = re.compile(r"\[HES-WAIT\] engine=(\S+) job=(\d+) kernel=(\d+) polls=(\d+)")
 DONE_RE = re.compile(r"\[HES\] core=(\S+) cycles=(\d+) instret=(\d+) errors=(\d+) "
                      r"total=(\d+) maxdiff_e6=(\d+) offload_failures=(\d+)")
+MNIST_RE = re.compile(r"\[HES-MNIST\] images=(\d+) correct=(\d+) agree_with_onnx=(\d+) "
+                      r"cycles_total=(\d+) cycles_per_image=(\d+) offload_failures=(\d+)")
 MEM_RE = re.compile(r"\[HES-MEM\] cache=(\S+) accesses=(\d+) reads=(\d+) writes=(\d+) "
                     r"hits=(\d+) misses=(\d+) latency_cycles=(\d+)")
 
@@ -134,6 +136,7 @@ def simulate(elfs: dict, run_dir: Path, total_nodes: int, timeout_s: int,
 
     prog = Progress(total_nodes, quiet)
     lines, result, caches = [], None, []
+    mnist_result = None
     stalled = False
     t_start = time.time()
 
@@ -155,6 +158,10 @@ def simulate(elfs: dict, run_dir: Path, total_nodes: int, timeout_s: int,
             m = DONE_RE.search(line)
             if m:
                 result = m
+                continue
+            m = MNIST_RE.search(line)
+            if m:
+                mnist_result = m
                 continue
             m = MEM_RE.search(line)
             if m:
@@ -202,6 +209,21 @@ def simulate(elfs: dict, run_dir: Path, total_nodes: int, timeout_s: int,
         })
         if out["errors"] or out["offload_failures"]:
             out["status"] = "wrong-result"
+    if mnist_result is not None:
+        images, correct, agree, total, per_image, fails = (
+            int(g) for g in mnist_result.groups())
+        out.update({
+            "images": images,
+            "correct": correct,
+            "agree_with_onnx": agree,
+            "cycles": total,
+            "cycles_per_image": per_image,
+            "accuracy": round(correct / images, 4) if images else None,
+            "offload_failures": fails,
+        })
+        # Disagreeing with the reference model is the failure; a mispredicted
+        # digit is not.
+        out["status"] = "ok" if (agree == images and fails == 0) else "wrong-result"
     if caches:
         out["caches"] = [{
             "cache": m.group(1).split("/")[-1],
@@ -230,8 +252,15 @@ def report(op_name: str, mapping: dict, res: dict) -> None:
             print(f"{engine:8} {cycles:>12} {share:>7.1f}%")
 
     print()
-    if res["status"] == "ok":
+    if "images" in res:
+        print(f"images   {res['images']}   correct {res['correct']} "
+              f"({100 * res['accuracy']:.1f}%)   agreeing with onnxruntime "
+              f"{res['agree_with_onnx']}/{res['images']}")
+        print(f"cycles   {res['cycles']} total, {res['cycles_per_image']} per image")
+    if res["status"] == "ok" and "images" not in res:
         print(f"status   ok       cycles={res['cycles']}  maxdiff={res.get('maxdiff')}")
+    elif res["status"] == "ok":
+        print("status   ok")
     elif res["status"] == "stalled":
         print("status   STALLED  no progress beacon before the stall timeout")
         for line in res.get("log_tail", []):
@@ -257,6 +286,8 @@ def main():
     ap.add_argument("op", help = "op dir (network.onnx + inputs.npz + outputs.npz)")
     ap.add_argument("--pin", choices = ["cva6", "snitch", "spatz"],
                     help = "force every node the engine can run onto it")
+    ap.add_argument("--images", type = int, default = 1000000,
+                    help = "cap the images an evaluation-set op classifies")
     ap.add_argument("--timeout", type = int, default = 3600, help = "wall limit [s]")
     ap.add_argument("--stall-timeout", type = int, default = 180,
                     help = "declare a stall after this long with no beacon [s]")
@@ -280,7 +311,14 @@ def main():
     mapping = generate(test_dir, gen_dir, args.pin, args.debug)
 
     print(f"[2/3] build: host + snitch cluster + spatz cluster")
-    elfs = build_network(gen_dir, work)
+    # An op carrying mnist_data.h brings its own images and its own host
+    # program, which scores them instead of diffing a single inference.
+    mnist = (test_dir / "mnist_data.h").is_file()
+    elfs = build_network(
+        gen_dir, work,
+        host_main = (ROOT / "runtime" / "mesh" / "mnist_main.c") if mnist else None,
+        extra_incs = [test_dir] if mnist else (),
+        samples = args.images if mnist else 1)
 
     print(f"[3/3] simulate on hetero_soc")
     res = simulate(elfs, work / "run", len(mapping["nodes"]), args.timeout,

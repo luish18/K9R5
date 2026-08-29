@@ -168,21 +168,28 @@ def build_test(test: str, work: Path, cluster_src=None, host_extra=()) -> dict:
     }
 
 
-def build_network(gen_dir: Path, work: Path, samples: int = 1) -> dict:
+def build_network(gen_dir: Path, work: Path, samples: int = 1,
+                  host_main: Path = None, extra_incs = ()) -> dict:
     """Build the three ELFs for a Deeploy-generated network.
 
     The host links the generated Network.c, the host runtime and the Generic
     kernel library -- it runs the nodes the mapper left on it. Each cluster
     links the job loop and its own kernels.
+
+    `host_main` selects the host program: the default runs the graph once and
+    diffs it against the ONNX reference, while an op that ships its own
+    evaluation set (MNIST) supplies one that loops over it and scores.
     """
+    if host_main is None:
+        host_main = MESH / "host_main.c"
     host_sources = [
         RUNTIME / "common" / "syscalls.c",
         MESH / "hes_host.c",
-        MESH / "host_main.c",
+        host_main,
         gen_dir / "Network.c",
     ]
     cluster_src = MESH / "cluster_main.c"
-    incs = [f"-I{gen_dir}"]
+    incs = [f"-I{gen_dir}", *[f"-I{p}" for p in extra_incs]]
 
     return {
         "host": build(HOST, host_sources, work / "host", with_kernels = True,
