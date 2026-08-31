@@ -8,8 +8,9 @@
     .section .text.init, "ax", @progbits
     .globl _start
 _start:
-    /* Enable the FPU (mstatus.FS); the host has no vector unit. */
-    li      t0, (3 << 13)
+    /* Enable the FPU (mstatus.FS) and, where the host has one, the vector
+     * unit (mstatus.VS). Without VS every vector instruction traps. */
+    li      t0, (3 << 13) | (3 << 9)
     csrs    mstatus, t0
     csrw    fcsr, zero          /* round-to-nearest, clear flags */
 
