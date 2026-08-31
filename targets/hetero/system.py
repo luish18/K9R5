@@ -55,6 +55,18 @@ CONTROL_REGS_SIZE = 0x1000_0000
 BOOTROM_BASE = 0x0000_1000
 BOOTROM_SIZE = 0x0001_0000
 
+# --- Host vector unit -------------------------------------------------------
+#
+# Geometry of the Ara unit attached to the CVA6 orchestrator. vlen is the
+# vector register length in bits; the stock GVSoC ara targets use 4096, which
+# is eight times the 512 a Spatz core carries, so one host vector register
+# holds 128 fp32 against a Spatz core's 16. Lanes and lane width are kept the
+# same as Spatz so that a comparison between them isolates the register file
+# and the memory side rather than confounding all three.
+HOST_VLEN = 4096
+HOST_NB_LANES = 4
+HOST_LANE_WIDTH = 8
+
 # The CVA6 does not sit in a cluster, so its hartid is picked above every
 # cluster hartid rather than colliding with core 0 of the Snitch cluster.
 HOST_HARTID = 16
