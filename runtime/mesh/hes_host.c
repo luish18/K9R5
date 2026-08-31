@@ -154,8 +154,14 @@ void hes_node_end(uint32_t idx, const char *op, uint32_t engine, uint32_t t0) {
   print_u64(idx);
   print_str(" op=");
   print_str(op);
-  print_str(" engine=");
-  print_str(hes_engine_name(engine));
+  /* The engine goes out as a number, not a name. Printing the name would
+   * mean another semi-hosted string write, and ISS v2's semi-hosting has been
+   * seen to drop one and repeat the previous one in its place -- harmless for
+   * a literal, but it silently misattributed a node's cycles when the driver
+   * had to parse the name back. The number cannot be misread, and the driver
+   * maps it with the same table that generated the code. */
+  print_str(" engine_id=");
+  print_u64(engine);
   print_str(" cycles=");
   print_u64(cycles);
   print_str("\n");

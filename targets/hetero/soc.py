@@ -35,6 +35,8 @@ import interco.router as router
 import memory.memory as memory
 import pulp.cva6.control_regs
 import pulp.cva6.cva6
+from pulp.cpu.iss.cva6 import Cva6
+from pulp.cpu.iss.cva6_config import Cva6Config
 import utils.loader.loader
 from elftools.elf.elffile import ELFFile
 from pulp.snitch.snitch_cluster.snitch_cluster import ClusterArch, SnitchCluster
@@ -60,7 +62,7 @@ def elf_entry(path: str) -> int:
 
 class HeteroSoc(st.Component):
 
-    def __init__(self, parent, name, parser):
+    def __init__(self, parent, name, parser, vector_host=False):
         super().__init__(parent, name)
 
         [args, __] = parser.parse_known_args()
@@ -134,9 +136,26 @@ class HeteroSoc(st.Component):
         # Main-memory port, also used by the loaders so they bypass the caches.
         mem_ico = router.Router(self, 'mem_ico')
 
-        host = pulp.cva6.cva6.CVA6(self, 'host', isa='rv64imafdc',
-                                   boot_addr=system.HOST_LOAD_BASE,
-                                   core_id=system.HOST_HARTID)
+        # The orchestrator, with or without a vector unit. The scalar variant
+        # is the ISS v1 core the board has always used; the vector one is the
+        # ISS v2 core with ara_v2 attached, as in targets/ara_host.py. Both
+        # expose data, fetch and fetchen identically, so only the vector
+        # variant's extra o_VLSU binding differs below.
+        if vector_host:
+            host = Cva6(self, 'host', config=Cva6Config(
+                isa='rv64imafdcv',
+                boot_addr=system.HOST_LOAD_BASE,
+                hart_id=system.HOST_HARTID,
+                fetch_enable=False,
+                htif=True,
+                vlen=system.HOST_VLEN,
+                nb_lanes=system.HOST_NB_LANES,
+                lane_width=system.HOST_LANE_WIDTH,
+            ))
+        else:
+            host = pulp.cva6.cva6.CVA6(self, 'host', isa='rv64imafdc',
+                                       boot_addr=system.HOST_LOAD_BASE,
+                                       core_id=system.HOST_HARTID)
 
         #
         # Bindings
@@ -175,6 +194,10 @@ class HeteroSoc(st.Component):
 
         self.bind(host, 'data', dico, 'input')
         self.bind(host, 'fetch', icache, 'input')
+        if vector_host:
+            # Vector accesses take the same route as scalar data, so they see
+            # the same cacheable/uncacheable split and the same hierarchy.
+            host.o_VLSU(dico.i_INPUT())
 
         # --- SoC interconnect ---
         # Main memory hangs off the wide router; the narrow one forwards to it,
@@ -224,9 +247,16 @@ class HeteroSoc(st.Component):
 
 class HeteroBoard(st.Component):
 
-    def __init__(self, parent, name, parser, options):
+    def __init__(self, parent, name, parser, options, vector_host=False):
         super().__init__(parent, name, options=options)
 
         clock = Clock_domain(self, 'clock', frequency=system.FREQUENCY)
-        soc = HeteroSoc(self, 'soc', parser)
+        soc = HeteroSoc(self, 'soc', parser, vector_host=vector_host)
         self.bind(clock, 'out', soc, 'clock')
+
+
+class HeteroAraBoard(HeteroBoard):
+    """The same SoC with a vector orchestrator instead of a scalar one."""
+
+    def __init__(self, parent, name, parser, options):
+        super().__init__(parent, name, parser, options, vector_host=True)

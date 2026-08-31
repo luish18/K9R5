@@ -68,6 +68,9 @@ class Image:
         return [f"-I{p}" for p in INCS + self.extra_incs]
 
 
+# The scalar orchestrator, and the same orchestrator with an Ara vector unit.
+# The vector one adds `v` to the march and vectorizes its kernels; glue stays
+# scalar through GLUE_FLAGS either way.
 HOST = Image(
     name="host",
     # The host keeps the C extension: unlike the clusters it has no decoupled
@@ -111,7 +114,20 @@ SPATZ = Image(
     kernel_overrides=["MatMul_fp32_fp32_fp32", "Gemm_fp32_fp32_fp32_fp32"],
 )
 
+HOST_ARA = Image(
+    name="host",
+    march="rv64imafdc_zicsr_zifencei_v",
+    mabi="lp64d",
+    linker=MESH / "host.ld",
+    crt0=MESH / "crt0_host.S",
+    defines=["-DHES_HOST"],
+    kernel_flags=["-O3", "-ffast-math"],
+)
+
 IMAGES = {img.name: img for img in (HOST, SNITCH, SPATZ)}
+
+# Which orchestrator a run uses, and the board that matches it.
+HOSTS = {"cva6": (HOST, "hetero_soc"), "ara": (HOST_ARA, "hetero_ara")}
 
 
 def build(image: Image, sources, out_dir: Path, opt="-O2", extra_flags=(),
@@ -169,7 +185,7 @@ def build_test(test: str, work: Path, cluster_src=None, host_extra=()) -> dict:
 
 
 def build_network(gen_dir: Path, work: Path, samples: int = 1,
-                  host_main: Path = None, extra_incs = ()) -> dict:
+                  host_main: Path = None, extra_incs = (), host: str = "cva6") -> dict:
     """Build the three ELFs for a Deeploy-generated network.
 
     The host links the generated Network.c, the host runtime and the Generic
@@ -191,8 +207,9 @@ def build_network(gen_dir: Path, work: Path, samples: int = 1,
     cluster_src = MESH / "cluster_main.c"
     incs = [f"-I{gen_dir}", *[f"-I{p}" for p in extra_incs]]
 
+    host_image = HOSTS[host][0]
     return {
-        "host": build(HOST, host_sources, work / "host", with_kernels = True,
+        "host": build(host_image, host_sources, work / "host", with_kernels = True,
                       extra_flags = [*incs, f"-DHES_SAMPLES={samples}"]),
         "snitch": build(SNITCH, [cluster_src], work / "snitch", with_kernels = True),
         "spatz": build(SPATZ, [cluster_src], work / "spatz", with_kernels = True),

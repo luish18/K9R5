@@ -31,13 +31,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from build_mesh import build_network  # noqa: E402
+from build_mesh import HOSTS, build_network  # noqa: E402
 from common import GVSOC, PYTHON, RESULTS, ROOT, TARGETS, WORK, note_file, set_debug  # noqa: E402
 
 DEEPLOY_TEST = ROOT / "deps" / "deeploy" / "DeeployTest"
 
 PROG_RE = re.compile(r"\[HES-PROG\] sample=(\d+)/(\d+) node=(\d+) op=(\S+) "
-                     r"engine=(\S+) cycles=(\d+)")
+                     r"engine_id=(\d+) cycles=(\d+)")
+
+# Engine ids as hetero_platform/progress.py emits them into the generated code.
+ENGINE_NAMES = {0: "cva6", 1: "snitch", 2: "spatz"}
 WAIT_RE = re.compile(r"\[HES-WAIT\] engine=(\S+) job=(\d+) kernel=(\d+) polls=(\d+)")
 DONE_RE = re.compile(r"\[HES\] core=(\S+) cycles=(\d+) instret=(\d+) errors=(\d+) "
                      r"total=(\d+) maxdiff_e6=(\d+) offload_failures=(\d+)")
@@ -97,7 +100,8 @@ class Progress:
         sys.stdout.flush()
 
     def beacon(self, m) -> None:
-        sample, samples, node, op, engine, cycles = m.groups()
+        sample, samples, node, op, engine_id, cycles = m.groups()
+        engine = ENGINE_NAMES.get(int(engine_id), f"engine{engine_id}")
         self.last_beacon = time.time()
         self.sample = (int(sample), int(samples))
         self.node = int(node) + 1
@@ -120,14 +124,14 @@ class Progress:
 
 
 def simulate(elfs: dict, run_dir: Path, total_nodes: int, timeout_s: int,
-             stall_s: int, quiet: bool) -> dict:
+             stall_s: int, quiet: bool, target: str = "hetero_soc") -> dict:
     run_dir.mkdir(parents = True, exist_ok = True)
     env = dict(os.environ)
     env["PATH"] = f"{ROOT / '.venv' / 'bin'}:{env['PATH']}"
     env["HES_ELF_SNITCH"] = str(elfs["snitch"])
     env["HES_ELF_SPATZ"] = str(elfs["spatz"])
 
-    cmd = [str(GVSOC), f"--target-dir={TARGETS}", "--target=hetero_soc",
+    cmd = [str(GVSOC), f"--target-dir={TARGETS}", f"--target={target}",
            f"--binary={elfs['host']}", "run"]
 
     proc = subprocess.Popen(cmd, cwd = run_dir, env = env, text = True,
@@ -274,6 +278,7 @@ def report(op_name: str, mapping: dict, res: dict) -> None:
 
     RESULTS.mkdir(exist_ok = True)
     suffix = f"-pin-{mapping['pin']}" if mapping.get("pin") else ""
+    suffix += "" if mapping.get("host", "cva6") == "cva6" else f"-{mapping['host']}"
     out = RESULTS / f"{op_name.replace('/', '_')}-hetero{suffix}.json"
     out.write_text(json.dumps({"op": op_name, "mapping": mapping, "result": res},
                               indent = 2))
@@ -286,6 +291,9 @@ def main():
     ap.add_argument("op", help = "op dir (network.onnx + inputs.npz + outputs.npz)")
     ap.add_argument("--pin", choices = ["cva6", "snitch", "spatz"],
                     help = "force every node the engine can run onto it")
+    ap.add_argument("--host", choices = list(HOSTS), default = "cva6",
+                    help = "orchestrator: the scalar CVA6, or the same core with "
+                           "an Ara vector unit (default: %(default)s)")
     ap.add_argument("--images", type = int, default = 1000000,
                     help = "cap the images an evaluation-set op classifies")
     ap.add_argument("--timeout", type = int, default = 3600, help = "wall limit [s]")
@@ -304,13 +312,14 @@ def main():
     except ValueError:
         op_name = test_dir.name
 
-    work = WORK / f"hetero_{op_name}" / (args.pin or "mapped")
+    work = WORK / f"hetero_{op_name}" / f"{args.host}-{args.pin or 'mapped'}"
     gen_dir = work / "gen"
 
     print(f"[1/3] Deeploy: {test_dir.name}/network.onnx -> C, mapped across engines")
     mapping = generate(test_dir, gen_dir, args.pin, args.debug)
+    mapping["host"] = args.host
 
-    print(f"[2/3] build: host + snitch cluster + spatz cluster")
+    print(f"[2/3] build: {args.host} host + snitch cluster + spatz cluster")
     # An op carrying mnist_data.h brings its own images and its own host
     # program, which scores them instead of diffing a single inference.
     mnist = (test_dir / "mnist_data.h").is_file()
@@ -318,11 +327,12 @@ def main():
         gen_dir, work,
         host_main = (ROOT / "runtime" / "mesh" / "mnist_main.c") if mnist else None,
         extra_incs = [test_dir] if mnist else (),
-        samples = args.images if mnist else 1)
+        samples = args.images if mnist else 1,
+        host = args.host)
 
-    print(f"[3/3] simulate on hetero_soc")
+    print(f"[3/3] simulate on {HOSTS[args.host][1]}")
     res = simulate(elfs, work / "run", len(mapping["nodes"]), args.timeout,
-                   args.stall_timeout, args.quiet)
+                   args.stall_timeout, args.quiet, target = HOSTS[args.host][1])
 
     report(op_name, mapping, res)
     sys.exit(0 if res["status"] == "ok" else 1)

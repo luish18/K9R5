@@ -7,7 +7,7 @@ ROOT := $(CURDIR)
 MEM ?= real
 # DEBUG=1 traces every command the pipeline runs and the files it generated
 DBG := $(if $(DEBUG),--debug)
-TARGETS := cva6 snitch spatz cva6_real snitch_real spatz_real hetero_soc ara_v2
+TARGETS := cva6 snitch spatz cva6_real snitch_real spatz_real hetero_soc ara_v2 ara_host hetero_ara
 
 .PHONY: run gvsoc smoke ssr-test mesh-probe mesh-test hetero mnist clean
 

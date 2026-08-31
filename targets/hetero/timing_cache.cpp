@@ -84,6 +84,11 @@ private:
     // the cycle at which the line is readable, or -1 if the line was missing.
     int64_t lookup(uint64_t line, bool allocate, int64_t ready_time);
 
+    // Resolved lazily on first use and then remembered; see the definition.
+    vp::DebugMemIf *next_level_backdoor();
+    vp::DebugMemIf *backdoor = NULL;
+    bool backdoor_resolved = false;
+
     vp::Trace trace;
     vp::IoSlave input_itf;
     vp::IoMaster output_itf;
@@ -124,20 +129,29 @@ private:
 
 // The component behind the output port, if it offers a backdoor. The cache
 // applies no address translation, so nothing needs adjusting on the way.
-static vp::DebugMemIf *next_level_backdoor(vp::IoMaster &output)
+//
+// Resolved once and remembered. The walk is recursive over the binding graph,
+// and semi-hosting reads its strings a byte at a time, so resolving per access
+// makes every character printed cost a graph traversal -- which does not show
+// up on a short run and then dominates a long one.
+vp::DebugMemIf *TimingCache::next_level_backdoor()
 {
-    std::vector<vp::SlavePort *> finals = output.get_final_ports();
-    if (finals.empty() || finals[0]->get_owner() == nullptr)
+    if (!this->backdoor_resolved)
     {
-        return NULL;
+        this->backdoor_resolved = true;
+        std::vector<vp::SlavePort *> finals = this->output_itf.get_final_ports();
+        if (!finals.empty() && finals[0]->get_owner() != nullptr)
+        {
+            this->backdoor = finals[0]->get_owner()->debug_mem_if();
+        }
     }
-    return finals[0]->get_owner()->debug_mem_if();
+    return this->backdoor;
 }
 
 int TimingCache::debug_mem_access(uint64_t addr, uint8_t *data, uint64_t size,
     bool is_write)
 {
-    vp::DebugMemIf *next = next_level_backdoor(this->output_itf);
+    vp::DebugMemIf *next = this->next_level_backdoor();
     if (next == NULL)
     {
         return -1;
@@ -150,7 +164,7 @@ void TimingCache::debug_mem_regions(std::vector<vp::DebugMemRegion> &regions,
 {
     // Recurse rather than take the default, which would advertise the cache
     // itself as a terminal region holding the data. It holds none.
-    vp::DebugMemIf *next = next_level_backdoor(this->output_itf);
+    vp::DebugMemIf *next = this->next_level_backdoor();
     if (next != NULL)
     {
         next->debug_mem_regions(regions, local_base, window_size, entry_base,

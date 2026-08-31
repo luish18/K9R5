@@ -20,7 +20,7 @@ TOOLCHAIN_URL="https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/relea
 
 # GVSoC targets to build: the three stock ones (--memory ideal) and the three
 # in targets/ that model the memory system (--memory real, the default).
-TARGETS="cva6 snitch spatz cva6_real snitch_real spatz_real hetero_soc ara_v2"
+TARGETS="cva6 snitch spatz cva6_real snitch_real spatz_real hetero_soc ara_v2 ara_host hetero_ara"
 
 log() { printf '\n=== %s\n' "$1"; }
 
