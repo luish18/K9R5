@@ -32,10 +32,17 @@ recolhe ciclos, erro numérico contra a referência ONNX e contadores de cache.
 ONNX op + inputs  ──Deeploy──►  C code  ──riscv-gcc──►  ELF(s)  ──GVSoC──►  métricas por núcleo
 ```
 
-O objetivo final — atingido na última etapa — é treinar uma CNN pequena,
+O objetivo original — atingido na seção 8 — era treinar uma CNN pequena,
 exportá-la para ONNX e classificar MNIST rodando a rede inteira sobre o chip
 simulado completo (host + os dois clusters), com o Deeploy decidindo
 automaticamente em qual núcleo cada nó do grafo roda.
+
+A seção 9 vai além dele, e por um motivo que só ficou visível depois que a
+tabela do MNIST existiu: escolher o melhor núcleo *por operação* não é o mesmo
+que usar a arquitetura heterogênea. Naquela tabela o cluster Snitch executa
+zero ciclos, e os dois clusters nunca trabalham ao mesmo tempo. O último marco
+é uma aplicação — *keyword spotting* — construída para precisar dos dois de
+fato, simultaneamente.
 
 ## 2. Linha do tempo
 
@@ -49,7 +56,7 @@ automaticamente em qual núcleo cada nó do grafo roda.
 | 08-26 | `c59b127`, `f8350fd`, `8d51ab9` | Placa `hetero_soc` (host + 2 clusters em um único chip), runtime de dispatch, plataforma Deeploy que mapeia cada nó ao núcleo certo |
 | 08-27 | `fa45f2c`, `2acdec4` | GEMM real em RVV + 8 núcleos de cômputo por cluster; kernels RVV viram padrão do pipeline — **tabela final de operador único** |
 | 08-29 | `1efa098` | **CNN de MNIST classificada na malha completa**, ponta a ponta |
-| 09-01 | — | **Keyword spotting com os dois clusters simultâneos**: `hes_post`/`hes_wait`, front-end MFCC, 1,82× sobre o serial |
+| 09-01 | `030c7c3` | **Keyword spotting com os dois clusters simultâneos**: `hes_post`/`hes_wait`, front-end MFCC — 1,82× sobre o mesmo trabalho serial, e o Snitch sai de 0% para 50% da carga |
 
 As seções seguintes detalham cada marco com sua tabela de desempenho.
 
@@ -252,15 +259,19 @@ reais rodando ponta a ponta sobre a arquitetura heterogênea simulada — com o
 compilador escolhendo automaticamente, por nó do grafo, o núcleo certo para
 cada operação.
 
-## 9. Os dois clusters ao mesmo tempo: keyword spotting
+Fecha também deixando duas coisas à vista na própria tabela, e é delas que a
+seção 9 trata: o cluster **Snitch executa zero ciclos**, e os motores nunca
+rodam ao mesmo tempo — 2.418.667 + 2.140.367 é uma soma, não um máximo.
 
-A seção 8 fecha o objetivo original, mas deixa duas coisas visíveis na própria
-tabela. Na malha completa rodando MNIST, o cluster **Snitch executa zero
-ciclos** — o modelo de custo manda, corretamente, todo nó denso para o Spatz — e
-`hes_offload()` é bloqueante, de modo que mesmo quando dois clusters poderiam
-trabalhar juntos eles se revezam: o tempo total é a *soma* dos motores, nunca o
-*máximo*. O que a seção 8 mede é escolha de operador, não computação
-heterogênea.
+## 9. Os dois clusters ao mesmo tempo: keyword spotting (commit `030c7c3`, 01/09)
+
+As duas lacunas que a seção 8 deixa têm cada uma sua causa, e nenhuma delas é
+acidental. O Snitch fica com zero ciclos porque o modelo de custo manda —
+corretamente — todo nó denso para o Spatz: nada naquela rede tem o formato que
+os sequenciadores Xssr/Xfrep sabem explorar. E os clusters se revezam porque
+`hes_offload()` é bloqueante: o host escreve o mailbox, toca a campainha e fica
+no *poll* até a resposta chegar, sem nada a fazer no meio-tempo. O que a seção 8
+mede, portanto, é escolha de operador — não computação heterogênea.
 
 `ops/kws` é uma aplicação construída para precisar dos dois. É *keyword
 spotting* sobre fala sintética, e tem dois estágios que querem hardware
@@ -292,7 +303,7 @@ sempre foi expressável, `hes_offload()` é que nunca usou isso.
 
 | estratégia | ciclos/clipe | vs. pipelined |
 |---|---|---|
-| front-end no snitch, classificador no spatz | **256.652** | — |
+| front-end no snitch, classificador no spatz | **256.660** | — |
 | o mesmo trabalho, serial (`SERIAL=1`) | 468.232 | 1,82× mais lento |
 | front-end no spatz, classificador no snitch (`FE=spatz PIN=snitch`) | 269.434 | 1,05× mais lento |
 | classificador no host (`PIN=cva6`, 8 clipes) | 1.539.740 | 6,0× mais lento |
@@ -301,9 +312,9 @@ E, pela primeira vez neste repositório, os três motores fazem trabalho real:
 
 | motor | ciclos (16 clipes) | fração | |
 |---|---|---|---|
-| snitch | 3.615.971 | 50,2% | o front-end MFCC |
+| snitch | 3.615.963 | 50,2% | o front-end MFCC |
 | spatz | 1.831.164 | 25,4% | Conv e Gemm |
-| cva6 | 1.755.342 | 24,4% | ReLU, MaxPool, Softmax, controle |
+| cva6 | 1.755.332 | 24,4% | ReLU, MaxPool, Softmax, controle |
 
 contra o `spatz 53% / cva6 47% / snitch 0%` do MNIST. **93,4% dos ciclos do
 front-end se sobrepõem ao classificador** e não custam tempo de parede algum.
@@ -373,21 +384,48 @@ que está sendo medido é o chip.
 
 ## 10. Resultado final consolidado
 
-As duas tabelas abaixo, lado a lado, resumem a evolução completa do projeto:
-operador isolado (núcleo único, seção 7) e rede completa (malha inteira,
-seção 8).
+A tabela abaixo resume a evolução completa em três escalas: operador isolado
+(núcleo único, seção 7), rede completa (malha inteira, seção 8) e aplicação
+com os dois clusters simultâneos (seção 9).
 
-| | escala | melhor núcleo por operação densa | ganho vs. CVA6 |
+| | escala | quem faz o trabalho denso | ganho | contra o quê |
+|---|---|---|---|---|
+| Operador isolado (`2acdec4`) | 1 núcleo por tipo | Spatz (matmul/GEMM), Snitch (Conv2D) | 17–63× | CVA6 |
+| MNIST na SoC completa (`1efa098`) | 8+8 núcleos de cômputo por cluster, rede inteira | Spatz (Conv, Gemm); CVA6 (Relu/Pool/Reshape/Softmax) | 7,3× | a mesma rede fixada no CVA6 |
+| KWS nos dois clusters (`030c7c3`) | dois estágios simultâneos, 8+8 núcleos | Snitch (front-end MFCC), Spatz (Conv/Gemm), CVA6 (ativações) | 1,82× | o mesmo trabalho, serial |
+
+Repare que as três linhas não medem a mesma coisa, e é justamente aí que está o
+argumento do projeto. As duas primeiras comparam **um núcleo contra outro** na
+mesma tarefa: são medidas de especialização, e a melhor resposta é sempre
+"mande para o núcleo mais rápido". A terceira compara **a mesma máquina contra
+ela mesma**, com e sem sobreposição: é uma medida de *concorrência*, e nela a
+resposta se inverte — o Spatz é mais rápido nos dois estágios do KWS e, ainda
+assim, o melhor posicionamento é aquele que o deixa no classificador e entrega
+o front-end ao Snitch (seção 9.2).
+
+E a distribuição da carga muda de figura junto com a métrica:
+
+| | snitch | spatz | cva6 |
 |---|---|---|---|
-| Operador isolado (`2acdec4`) | 1 núcleo por tipo | Spatz (matmul/GEMM), Snitch (Conv2D) | 17–63× |
-| MNIST na SoC completa (`1efa098`) | 8+8 núcleos de cômputo por cluster, rede inteira | Spatz (Conv, Gemm); CVA6 (Relu/Pool/Reshape/Softmax) | 7,3× ponta a ponta |
-| KWS nos dois clusters | front-end e classificador simultâneos | Snitch (front-end MFCC), Spatz (Conv/Gemm), CVA6 (ativações) | 1,82× sobre o mesmo trabalho serial |
+| MNIST na malha (seção 8) | **0%** | 53% | 47% |
+| KWS nos dois clusters (seção 9) | **50,2%** | 25,4% | 24,4% |
 
-A trajetória em três frases: **Snitch domina** enquanto o Spatz roda código
+A trajetória em quatro frases: **Snitch domina** enquanto o Spatz roda código
 de compilador (seção 4); **Spatz domina** assim que ganha um kernel RVV
-escrito à mão (seções 6–7); e, na malha completa rodando uma CNN real, o
-**mapeamento automático do Deeploy reproduz exatamente** essa mesma decisão
-por operação — sem que fosse necessário fixar nada à mão (seção 8).
+escrito à mão (seções 6–7); na malha completa rodando uma CNN real, o
+**mapeamento automático do Deeploy reproduz exatamente** essa mesma decisão por
+operação, sem que fosse necessário fixar nada à mão (seção 8); e, quando a
+aplicação finalmente tem dois estágios independentes para oferecer, o critério
+deixa de ser "qual núcleo é mais rápido nesta operação" e passa a ser **"qual
+estágio determina o período do pipeline"** (seção 9).
+
+Vale registrar o que *não* se confirmou. O KWS foi desenhado sobre a hipótese
+de que um front-end MFCC seria trabalho de formato Snitch — borboletas de FFT
+com passo variável e reduções curtas e irregulares, o pior caso do RVV. A
+medição diz o contrário: o Spatz é 1,22× mais rápido no front-end. A hipótese
+está registrada como refutada (seção 9.3), pelo mesmo critério que já havia
+derrubado o "Snitch vence tudo em fp32" da seção 4 — neste projeto uma
+conclusão vale enquanto a próxima medição não a contradiz.
 
 ## 11. Limitações e trabalhos futuros
 

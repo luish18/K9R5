@@ -206,7 +206,7 @@ Run it with `make kws`. 16 clips, all numbers from the modelled-memory board:
 
 | | cycles/clip | vs. pipelined |
 |---|---|---|
-| front-end on snitch, classifier on spatz | **256,652** | — |
+| front-end on snitch, classifier on spatz | **256,660** | — |
 | the same work, serial (`SERIAL=1`) | 468,232 | 1.82× slower |
 | front-end on spatz, classifier on snitch (`FE=spatz PIN=snitch`) | 269,434 | 1.05× slower |
 | classifier on the host (`PIN=cva6`, 8 clips) | 1,539,740 | 6.0× slower |
@@ -215,9 +215,9 @@ and, for the first time in this repository, all three engines do real work:
 
 | engine | cycles (16 clips) | share | |
 |---|---|---|---|
-| snitch | 3,615,971 | 50.2% | the MFCC front-end |
+| snitch | 3,615,963 | 50.2% | the MFCC front-end |
 | spatz | 1,831,164 | 25.4% | Conv and Gemm |
-| cva6 | 1,755,342 | 24.4% | ReLU, MaxPool, Softmax, control |
+| cva6 | 1,755,332 | 24.4% | ReLU, MaxPool, Softmax, control |
 
 against MNIST's `spatz 53% / cva6 47% / snitch 0%`. 93.4% of the front-end's
 cycles overlap the classifier and cost no wall time at all.
