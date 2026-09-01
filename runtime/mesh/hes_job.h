@@ -35,6 +35,25 @@ enum {
   HES_CONV_NARGS
 };
 
+/* Mfcc_fp32_fp32(audio, out, nb_frames, frame_len, hop, fft_len, window,
+ *                twiddles, mel_coeff, mel_start, mel_len, nb_mel, dct, nb_cep,
+ *                scratch)
+ *   out[nb_frames][nb_cep], the cepstra of `nb_frames` frames of `audio`.
+ *
+ * MEL_COEFFS is not a kernel argument: it is how many banded coefficients
+ * mel_coeff holds, which the kernel walks via mel_len but the DMA core needs
+ * up front to know how much to stage. `scratch` is likewise absent -- it is
+ * cluster-local and handed to the kernel by cluster_main.c, one slab per
+ * compute core, so it never crosses the mailbox.
+ */
+enum {
+  HES_MFCC_AUDIO = 0, HES_MFCC_OUT, HES_MFCC_NB_FRAMES, HES_MFCC_FRAME_LEN,
+  HES_MFCC_HOP, HES_MFCC_FFT_LEN, HES_MFCC_WINDOW, HES_MFCC_TWIDDLES,
+  HES_MFCC_MEL_COEFF, HES_MFCC_MEL_START, HES_MFCC_MEL_LEN, HES_MFCC_NB_MEL,
+  HES_MFCC_DCT, HES_MFCC_NB_CEP, HES_MFCC_MEL_COEFFS,
+  HES_MFCC_NARGS
+};
+
 /* Set in `flags` to ask the DMA core to stage the operands into TCDM before
  * the kernel runs and copy the result back after. Without it the kernel runs
  * against main memory directly: correct, but every access pays DRAM latency.

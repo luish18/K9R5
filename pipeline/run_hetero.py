@@ -46,8 +46,35 @@ DONE_RE = re.compile(r"\[HES\] core=(\S+) cycles=(\d+) instret=(\d+) errors=(\d+
                      r"total=(\d+) maxdiff_e6=(\d+) offload_failures=(\d+)")
 MNIST_RE = re.compile(r"\[HES-MNIST\] images=(\d+) correct=(\d+) agree_with_onnx=(\d+) "
                       r"cycles_total=(\d+) cycles_per_image=(\d+) offload_failures=(\d+)")
+KWS_RE = re.compile(
+    r"\[HES-KWS\] clips=(\d+) correct=(\d+) agree_with_onnx=(\d+) "
+    r"mfcc_maxdiff_e6=(\d+) cycles_total=(\d+) cycles_per_clip=(\d+) "
+    r"frontend_engine=(\d+) frontend_busy=(\d+) frontend_wait=(\d+) hidden=(\d+) "
+    r"snitch_busy=(\d+) spatz_busy=(\d+) pipelined=(\d+) offload_failures=(\d+)")
 MEM_RE = re.compile(r"\[HES-MEM\] cache=(\S+) accesses=(\d+) reads=(\d+) writes=(\d+) "
                     r"hits=(\d+) misses=(\d+) latency_cycles=(\d+)")
+
+
+# An op that ships its own evaluation set brings its own host program too: one
+# that loops over the set and scores it, instead of running a single inference
+# and diffing it. An op is recognised by the data header it carries.
+#
+#   header          the generated header that identifies the application
+#   main            the host program under runtime/mesh
+#   beacon          the regex for the single metrics line it prints
+#   samples_flag    what --images caps, for the message
+APPS = {
+    "mnist": {"header": "mnist_data.h", "main": "mnist_main.c", "unit": "image"},
+    "kws": {"header": "kws_data.h", "main": "kws_main.c", "unit": "clip"},
+}
+
+
+def detect_app(test_dir: Path):
+    """Which application this op directory is, if any."""
+    for name, app in APPS.items():
+        if (test_dir / app["header"]).is_file():
+            return name, app
+    return None, None
 
 
 def resolve_op(op: str) -> Path:
@@ -141,6 +168,7 @@ def simulate(elfs: dict, run_dir: Path, total_nodes: int, timeout_s: int,
     prog = Progress(total_nodes, quiet)
     lines, result, caches = [], None, []
     mnist_result = None
+    kws_result = None
     stalled = False
     t_start = time.time()
 
@@ -166,6 +194,10 @@ def simulate(elfs: dict, run_dir: Path, total_nodes: int, timeout_s: int,
             m = MNIST_RE.search(line)
             if m:
                 mnist_result = m
+                continue
+            m = KWS_RE.search(line)
+            if m:
+                kws_result = m
                 continue
             m = MEM_RE.search(line)
             if m:
@@ -228,6 +260,34 @@ def simulate(elfs: dict, run_dir: Path, total_nodes: int, timeout_s: int,
         # Disagreeing with the reference model is the failure; a mispredicted
         # digit is not.
         out["status"] = "ok" if (agree == images and fails == 0) else "wrong-result"
+    if kws_result is not None:
+        (clips, correct, agree, maxdiff_e6, total, per_clip, fe_engine, fe_busy,
+         fe_wait, hidden, snitch_busy, spatz_busy, pipelined, fails) = (
+            int(g) for g in kws_result.groups())
+        out.update({
+            "clips": clips,
+            "correct": correct,
+            "agree_with_onnx": agree,
+            "mfcc_maxdiff": maxdiff_e6 / 1e6,
+            "cycles": total,
+            "cycles_per_clip": per_clip,
+            "accuracy": round(correct / clips, 4) if clips else None,
+            "frontend_engine": ENGINE_NAMES.get(fe_engine, str(fe_engine)),
+            "frontend_busy": fe_busy,
+            "frontend_wait": fe_wait,
+            # Front-end cycles that cost the host nothing because they ran while
+            # the classifier did. Zero by construction without --serial.
+            "hidden_cycles": hidden,
+            "cluster_busy": {"snitch": snitch_busy, "spatz": spatz_busy},
+            "pipelined": bool(pipelined),
+            "offload_failures": fails,
+        })
+        # Three ways this run can be wrong, and a misheard keyword is none of
+        # them: disagreeing with onnxruntime, a front-end that drifted from the
+        # numpy reference, or a failed offload.
+        out["status"] = ("ok" if (agree == clips and fails == 0
+                                  and out["mfcc_maxdiff"] <= 1e-3)
+                         else "wrong-result")
     if caches:
         out["caches"] = [{
             "cache": m.group(1).split("/")[-1],
@@ -261,10 +321,39 @@ def report(op_name: str, mapping: dict, res: dict) -> None:
               f"({100 * res['accuracy']:.1f}%)   agreeing with onnxruntime "
               f"{res['agree_with_onnx']}/{res['images']}")
         print(f"cycles   {res['cycles']} total, {res['cycles_per_image']} per image")
-    if res["status"] == "ok" and "images" not in res:
+    if "clips" in res:
+        print(f"clips    {res['clips']}   correct {res['correct']} "
+              f"({100 * res['accuracy']:.1f}%)   agreeing with onnxruntime "
+              f"{res['agree_with_onnx']}/{res['clips']}")
+        print(f"cycles   {res['cycles']} total, {res['cycles_per_clip']} per clip")
+        print(f"mfcc     max |chip - numpy| = {res['mfcc_maxdiff']:.2e}")
+        busy = res["cluster_busy"]
+        print(f"\nfront-end on {res['frontend_engine']}, "
+              f"{'pipelined' if res['pipelined'] else 'serial'}")
+        # The table above counts only graph nodes, and the MFCC front-end is
+        # not one -- it is dispatched by the host program, so it emits no node
+        # beacon and its cluster shows up there with nothing to do. This is the
+        # whole application: the clusters as they counted themselves, the host
+        # from its own node beacons.
+        whole = dict(busy)
+        whole["cva6"] = res["per_engine_cycles"].get("cva6", 0)
+        grand = sum(whole.values())
+        print(f"\n{'engine':8} {'cycles':>12} {'share':>8}   whole application")
+        print("-" * 48)
+        for name, cycles in sorted(whole.items(), key = lambda kv: -kv[1]):
+            share = 100 * cycles / grand if grand else 0
+            note = "  <- front-end" if name == res["frontend_engine"] else ""
+            print(f"{name:8} {cycles:>12} {share:>7.1f}%{note}")
+        # The number the whole application exists to produce: front-end cycles
+        # that the classifier's own runtime paid for.
+        pct = 100 * res["hidden_cycles"] / res["frontend_busy"] if res["frontend_busy"] else 0
+        print(f"\nfront-end {res['frontend_busy']} cycles, of which "
+              f"{res['hidden_cycles']} ({pct:.1f}%) overlapped the classifier "
+              f"and cost no wall time")
+    if res["status"] == "ok" and "images" not in res and "clips" not in res:
         print(f"status   ok       cycles={res['cycles']}  maxdiff={res.get('maxdiff')}")
     elif res["status"] == "ok":
-        print("status   ok")
+        print("\nstatus   ok")
     elif res["status"] == "stalled":
         print("status   STALLED  no progress beacon before the stall timeout")
         for line in res.get("log_tail", []):
@@ -279,6 +368,10 @@ def report(op_name: str, mapping: dict, res: dict) -> None:
     RESULTS.mkdir(exist_ok = True)
     suffix = f"-pin-{mapping['pin']}" if mapping.get("pin") else ""
     suffix += "" if mapping.get("host", "cva6") == "cva6" else f"-{mapping['host']}"
+    if mapping.get("frontend") and mapping["frontend"] != "snitch":
+        suffix += f"-fe-{mapping['frontend']}"
+    if mapping.get("serial"):
+        suffix += "-serial"
     out = RESULTS / f"{op_name.replace('/', '_')}-hetero{suffix}.json"
     out.write_text(json.dumps({"op": op_name, "mapping": mapping, "result": res},
                               indent = 2))
@@ -295,7 +388,16 @@ def main():
                     help = "orchestrator: the scalar CVA6, or the same core with "
                            "an Ara vector unit (default: %(default)s)")
     ap.add_argument("--images", type = int, default = 1000000,
-                    help = "cap the images an evaluation-set op classifies")
+                    help = "cap the samples an evaluation-set op classifies")
+    ap.add_argument("--frontend", choices = ["snitch", "spatz"], default = "snitch",
+                    help = "cluster that runs the KWS MFCC front-end; the "
+                           "classifier's nodes go wherever the mapper put them "
+                           "(default: %(default)s)")
+    ap.add_argument("--serial", action = "store_true",
+                    help = "KWS: run the front-end after the classifier instead "
+                           "of overlapping it -- the same work with the two "
+                           "clusters taking turns, which is the baseline the "
+                           "pipelined run is measured against")
     ap.add_argument("--timeout", type = int, default = 3600, help = "wall limit [s]")
     ap.add_argument("--stall-timeout", type = int, default = 180,
                     help = "declare a stall after this long with no beacon [s]")
@@ -312,7 +414,10 @@ def main():
     except ValueError:
         op_name = test_dir.name
 
-    work = WORK / f"hetero_{op_name}" / f"{args.host}-{args.pin or 'mapped'}"
+    variant = f"{args.host}-{args.pin or 'mapped'}"
+    if (test_dir / "kws_data.h").is_file():
+        variant += f"-fe{args.frontend}" + ("-serial" if args.serial else "")
+    work = WORK / f"hetero_{op_name}" / variant
     gen_dir = work / "gen"
 
     print(f"[1/3] Deeploy: {test_dir.name}/network.onnx -> C, mapped across engines")
@@ -320,15 +425,39 @@ def main():
     mapping["host"] = args.host
 
     print(f"[2/3] build: {args.host} host + snitch cluster + spatz cluster")
-    # An op carrying mnist_data.h brings its own images and its own host
-    # program, which scores them instead of diffing a single inference.
-    mnist = (test_dir / "mnist_data.h").is_file()
+    app_name, app = detect_app(test_dir)
+    defines = []
+    if app_name == "kws":
+        # The front-end and the classifier have to be on *different* clusters.
+        # A cluster's mailbox holds one job descriptor, so posting the
+        # front-end for clip n+1 to the same cluster the classifier for clip n
+        # is using would overwrite a job in flight -- which the host runtime
+        # refuses rather than corrupts, turning the run into a wall of failed
+        # offloads. Catch it here instead, where it can be explained.
+        clash = [n["node"] for n in mapping["nodes"]
+                 if n["engine"] == args.frontend]
+        if clash:
+            sys.exit(
+                f"error: the front-end is on {args.frontend}, but the mapper "
+                f"also put {len(clash)} classifier node(s) there "
+                f"({', '.join(clash[:3])}{'...' if len(clash) > 3 else ''}).\n"
+                f"       The two stages have to run on different clusters -- "
+                f"that is what makes them overlap.\n"
+                f"       Pin the classifier to the other one, e.g. "
+                f"--frontend {args.frontend} --pin "
+                f"{'snitch' if args.frontend == 'spatz' else 'spatz'}")
+        engine_id = {v: k for k, v in ENGINE_NAMES.items()}[args.frontend]
+        defines = [f"-DKWS_FRONTEND_ENGINE={engine_id}",
+                   f"-DKWS_PIPELINED={0 if args.serial else 1}"]
+        mapping["frontend"] = args.frontend
+        mapping["serial"] = args.serial
     elfs = build_network(
         gen_dir, work,
-        host_main = (ROOT / "runtime" / "mesh" / "mnist_main.c") if mnist else None,
-        extra_incs = [test_dir] if mnist else (),
-        samples = args.images if mnist else 1,
-        host = args.host)
+        host_main = (ROOT / "runtime" / "mesh" / app["main"]) if app else None,
+        extra_incs = [test_dir] if app else (),
+        samples = args.images if app else 1,
+        host = args.host,
+        extra_defines = defines)
 
     print(f"[3/3] simulate on {HOSTS[args.host][1]}")
     res = simulate(elfs, work / "run", len(mapping["nodes"]), args.timeout,

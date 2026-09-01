@@ -25,6 +25,10 @@ static const engine_t engines[HES_NB_ENGINES] = {
  * stale done_seq from the previous job can never be mistaken for this one. */
 static uint32_t next_seq[HES_NB_ENGINES];
 
+/* Offloads that went wrong. Non-zero means the reported numbers are not
+ * trustworthy; hes_check() below is the only thing that raises it. */
+static uint32_t failure_count;
+
 int hes_engine_requires_staging(uint32_t engine) {
   return engine < HES_NB_ENGINES ? (int)engines[engine].requires_staging : 0;
 }
@@ -56,11 +60,38 @@ static void ring_doorbell(const engine_t *e) {
   *clint = 1u << e->ctrl_core;
 }
 
-hes_result_t hes_offload(uint32_t engine, uint32_t kernel, const uint32_t *args,
-                         uint32_t nargs, uint32_t flags) {
-  hes_result_t res = {0, 0, 0, 0};
+/* Jobs posted but not yet waited for, one per engine. The mailbox holds a
+ * single descriptor, so a second post before the wait would overwrite a job
+ * the cluster may still be reading -- refuse that rather than corrupt it. */
+static uint32_t in_flight[HES_NB_ENGINES];
+/* Cycles each engine has spent on jobs, as the engine itself counted them.
+ * With two clusters running at once the host's own elapsed time no longer
+ * says how busy either was, so they report it and this keeps the running
+ * total. */
+static uint32_t busy_cycles[HES_NB_ENGINES];
+
+uint32_t hes_engine_busy(uint32_t engine) {
+  return engine < HES_NB_ENGINES ? busy_cycles[engine] : 0;
+}
+
+int hes_engine_in_flight(uint32_t engine) {
+  return engine < HES_NB_ENGINES ? (int)in_flight[engine] : 0;
+}
+
+int hes_post(uint32_t engine, uint32_t kernel, const uint32_t *args,
+             uint32_t nargs, uint32_t flags) {
   if (engine == HES_ENGINE_CVA6 || engine >= HES_NB_ENGINES) {
-    return res;
+    return 1;
+  }
+  if (in_flight[engine]) {
+    /* Not counted here: every post is matched by a hes_wait(), which returns a
+     * zeroed result when nothing is in flight and so fails in hes_check()
+     * exactly once. Counting it in both places would double the number the run
+     * reports. */
+    print_str("[HES-ERR] post to busy engine ");
+    print_str(engines[engine].name);
+    print_str("\n");
+    return 1;
   }
 
   const engine_t *e = &engines[engine];
@@ -81,11 +112,26 @@ hes_result_t hes_offload(uint32_t engine, uint32_t kernel, const uint32_t *args,
   /* The descriptor has to be in place before the job number that publishes
    * it; the cluster reads them in the opposite order. */
   __asm__ volatile("" ::: "memory");
-  uint32_t seq = ++next_seq[engine];
-  mbox->seq = seq;
+  mbox->seq = ++next_seq[engine];
   __asm__ volatile("" ::: "memory");
 
   ring_doorbell(e);
+  in_flight[engine] = 1;
+  return 0;
+}
+
+hes_result_t hes_wait(uint32_t engine) {
+  hes_result_t res = {0, 0, 0, 0, 0};
+  if (engine == HES_ENGINE_CVA6 || engine >= HES_NB_ENGINES ||
+      !in_flight[engine]) {
+    return res;
+  }
+
+  const engine_t *e = &engines[engine];
+  hes_mailbox_t *mbox = hes_mailbox_at(e->tcdm);
+  const uint32_t seq = next_seq[engine];
+  const uint32_t kernel = mbox->kernel_id;
+  in_flight[engine] = 0;
 
   for (uint32_t beat = 0; beat < HES_MAX_HEARTBEATS; beat++) {
     for (uint32_t i = 0; i < HES_HEARTBEAT_POLLS; i++) {
@@ -95,6 +141,7 @@ hes_result_t hes_offload(uint32_t engine, uint32_t kernel, const uint32_t *args,
         res.staged = mbox->staged;
         res.error = mbox->error;
         res.ok = mbox->trap_cause == 0 && mbox->error == 0;
+        busy_cycles[engine] += res.cycles;
         return res;
       }
     }
@@ -119,9 +166,17 @@ hes_result_t hes_offload(uint32_t engine, uint32_t kernel, const uint32_t *args,
   return res;
 }
 
+hes_result_t hes_offload(uint32_t engine, uint32_t kernel, const uint32_t *args,
+                         uint32_t nargs, uint32_t flags) {
+  hes_result_t res = {0, 0, 0, 0, 0};
+  if (hes_post(engine, kernel, args, nargs, flags) != 0) {
+    return res;
+  }
+  return hes_wait(engine);
+}
+
 /* --- Progress ------------------------------------------------------------ */
 
-static uint32_t failure_count;
 static uint32_t sample_idx, sample_total;
 
 uint32_t hes_failures(void) { return failure_count; }
@@ -169,7 +224,7 @@ void hes_node_end(uint32_t idx, const char *op, uint32_t engine, uint32_t t0) {
 
 /* --- Kernel wrappers ------------------------------------------------------ */
 
-static int finish(uint32_t engine, const char *what, hes_result_t r) {
+int hes_check(uint32_t engine, const char *what, hes_result_t r) {
   if (r.ok) {
     return 0;
   }
@@ -180,10 +235,14 @@ static int finish(uint32_t engine, const char *what, hes_result_t r) {
   print_str(hes_engine_name(engine));
   if (r.error == HES_ERR_NEEDS_STAGING) {
     print_str(": operands do not fit the cluster scratchpad");
+  } else if (r.error == HES_ERR_NO_SCRATCH) {
+    print_str(": no room in the cluster scratchpad for the kernel's working "
+              "storage");
   }
   print_str("\n");
   return 1;
 }
+
 
 int hes_offload_matmul(uint32_t engine, const void *A, const void *B, void *Y,
                        uint32_t M, uint32_t N, uint32_t O) {
@@ -194,7 +253,7 @@ int hes_offload_matmul(uint32_t engine, const void *A, const void *B, void *Y,
   args[HES_MM_M] = M;
   args[HES_MM_N] = N;
   args[HES_MM_O] = O;
-  return finish(engine, "MatMul",
+  return hes_check(engine, "MatMul",
                 hes_offload(engine, HES_K_MATMUL_FP32, args, HES_MM_NARGS,
                             HES_JOB_STAGE));
 }
@@ -212,7 +271,7 @@ int hes_offload_gemm(uint32_t engine, const void *A, const void *B,
   args[HES_GEMM_O] = O;
   args[HES_GEMM_TRANSA] = transA;
   args[HES_GEMM_TRANSB] = transB;
-  return finish(engine, "Gemm",
+  return hes_check(engine, "Gemm",
                 hes_offload(engine, HES_K_GEMM_FP32, args, HES_GEMM_NARGS,
                             HES_JOB_STAGE));
 }
@@ -235,7 +294,42 @@ int hes_offload_conv2d(uint32_t engine, const void *A, uint32_t C, uint32_t H,
   args[HES_CONV_BIAS] = (uint32_t)(uintptr_t)bias;
   args[HES_CONV_HAS_BIAS] = has_bias;
   args[HES_CONV_Y] = (uint32_t)(uintptr_t)Y;
-  return finish(engine, "Conv2d",
+  return hes_check(engine, "Conv2d",
                 hes_offload(engine, HES_K_CONV2D_FP32, args, HES_CONV_NARGS,
                             HES_JOB_STAGE));
+}
+
+/* --- The MFCC front-end --------------------------------------------------- */
+
+static void mfcc_args(const hes_mfcc_job_t *job, uint32_t *args) {
+  args[HES_MFCC_AUDIO] = (uint32_t)(uintptr_t)job->audio;
+  args[HES_MFCC_OUT] = (uint32_t)(uintptr_t)job->out;
+  args[HES_MFCC_NB_FRAMES] = job->nb_frames;
+  args[HES_MFCC_FRAME_LEN] = job->frame_len;
+  args[HES_MFCC_HOP] = job->hop;
+  args[HES_MFCC_FFT_LEN] = job->fft_len;
+  args[HES_MFCC_WINDOW] = (uint32_t)(uintptr_t)job->window;
+  args[HES_MFCC_TWIDDLES] = (uint32_t)(uintptr_t)job->twiddles;
+  args[HES_MFCC_MEL_COEFF] = (uint32_t)(uintptr_t)job->mel_coeff;
+  args[HES_MFCC_MEL_START] = (uint32_t)(uintptr_t)job->mel_start;
+  args[HES_MFCC_MEL_LEN] = (uint32_t)(uintptr_t)job->mel_len;
+  args[HES_MFCC_NB_MEL] = job->nb_mel;
+  args[HES_MFCC_DCT] = (uint32_t)(uintptr_t)job->dct;
+  args[HES_MFCC_NB_CEP] = job->nb_cep;
+  args[HES_MFCC_MEL_COEFFS] = job->mel_coeffs;
+}
+
+int hes_offload_mfcc(uint32_t engine, const hes_mfcc_job_t *job) {
+  uint32_t args[HES_MFCC_NARGS];
+  mfcc_args(job, args);
+  return hes_check(engine, "Mfcc",
+                   hes_offload(engine, HES_K_MFCC_FP32, args, HES_MFCC_NARGS,
+                               HES_JOB_STAGE));
+}
+
+int hes_post_mfcc(uint32_t engine, const hes_mfcc_job_t *job) {
+  uint32_t args[HES_MFCC_NARGS];
+  mfcc_args(job, args);
+  return hes_post(engine, HES_K_MFCC_FP32, args, HES_MFCC_NARGS,
+                  HES_JOB_STAGE);
 }
