@@ -117,6 +117,88 @@ simulador em qualquer máquina. Em seguida, o Spatz recebeu kernels de
 MatMul/GEMM escritos à mão em RVV (via a flag `--spatz-kernels rvv`), em vez
 de depender do autovetorizador do GCC.
 
+### 6.1 O sintoma que não fechava
+
+A tabela da seção 4 dizia que um Snitch *escalar* vencia um Spatz de 4 lanes em
+toda a família matmul — GEMM por 1,4×, MatMul por 1,3×, e Conv2D por 2,6×.
+Essa conclusão não fecha
+com o hardware: quatro lanes de FMA não perdem para uma FPU escalar num laço
+denso de multiplicação-acumulação, por mais bem alimentada que ela esteja. Ou a
+descrição do hardware estava errada, ou o Spatz não estava rodando o código que
+deveria. A segunda hipótese é a testável.
+
+### 6.2 Uma chave que isola a variável
+
+Em vez de comparar dois programas diferentes, o pipeline ganhou a flag
+`--spatz-kernels {tuned,autovec}`, que troca *apenas* os kernels do Spatz —
+mesmo grafo ONNX, mesmo runtime, mesma placa, mesmo modelo de memória, mesma
+contagem de núcleos. Com uma variável só, "o código gerado é a causa" deixa de
+ser opinião e vira medição repetível. A flag continua no pipeline exatamente
+para que a comparação possa ser refeita a qualquer momento.
+
+### 6.3 A prova: o que o compilador de fato emitiu
+
+Desassemblar os dois binários responde à pergunta diretamente. Instruções
+vetoriais dentro do kernel GEMM, mesmo fonte, mesmas flags de arquitetura
+(`riscv-none-elf-objdump -d`):
+
+| instrução | o que faz | autovetorizado | escrito à mão |
+|---|---|---|---|
+| `vlse32.v` | carga com passo — desce uma coluna de B | **2** | 0 |
+| `vluxei32.v` | *gather* indexado | **1** | 0 |
+| `vfredusum.vs` | redução horizontal, uma por elemento de saída | **3** | 0 |
+| `vfmv.f.s` | extrai o escalar reduzido | **3** | 0 |
+| `vle32.v` | carga unitária | 3 | **7** |
+| `vfmacc.vf` | FMA com escalar transmitido | 0 | **5** |
+
+Não é que o GCC tenha falhado em vetorizar — ele vetorizou. Vetorizou o **laço
+interno**, que num matmul é o produto escalar, e essa é a escolha errada para
+esta máquina duas vezes: obriga a ler B descendo uma coluna, e obriga uma
+redução horizontal por resultado.
+
+### 6.4 Por que essas instruções custam caro *neste* chip
+
+A TCDM do cluster tem 4 superbancos × 8 bancos de 8 B = **32 bancos**, com
+período de intercalação de 256 B. Uma coluna de B tem passo `O×4` bytes, e o
+número de bancos distintos que a carga alcança é `32 / mdc(32, passo/8)`:
+
+| largura da linha O | passo | bancos alcançados | |
+|---|---|---|---|
+| 8 | 32 B | 8 de 32 | — |
+| 16 | 64 B | 4 de 32 | — |
+| 32 (o benchmark) | 128 B | **2 de 32** | 16× de paralelismo perdido |
+| 64 | 256 B | **1 de 32** | serializa por completo |
+| 128 | 512 B | **1 de 32** | serializa por completo |
+
+Ou seja: para *toda* largura de linha que seja potência de dois — que é o caso
+de praticamente toda camada de rede neural — a carga com passo colapsa sobre um
+ou dois bancos, e uma operação que deveria ocupar 32 bancos em paralelo vira uma
+fila. A `vfredusum.vs` agrava por outro caminho: é a única operação vetorial
+cujo custo **não se amortiza no comprimento do vetor**, porque produz um escalar
+por vez — e o laço a executa uma vez por elemento de saída.
+
+### 6.5 A confirmação
+
+A correção é trocar a forma, não o compilador: manter o acumulador num
+registrador vetorial ao longo de todo o laço `k`, transmitir o elemento de A com
+`vfmacc.vf` e ler B em passo unitário. As três instruções caras desaparecem do
+desassemblado, e a medição fecha o argumento — mesma placa, só os kernels
+trocados:
+
+| memória | autovetorizado | escrito à mão | |
+|---|---|---|---|
+| ideal (latência zero) | 59.804 | **6.356** | 9,4× |
+| modelada | 60.900 | **8.400** | 7,3× |
+
+A diferença entre as duas linhas é ela própria informativa: o número
+autovetorizado quase não muda entre memória ideal e modelada (59,8k → 60,9k),
+porque já estava dominado por conflito de bancos dentro da TCDM, não por acesso
+à DRAM. O kernel escrito à mão, por ser muito menor, sente o custo fixo do
+sistema de memória proporcionalmente muito mais — e é por isso que a razão cai
+de 9,4× para 7,3×.
+
+### 6.6 E a tabela vira
+
 | operador | shape | cva6 | snitch | spatz |
 |---|---|---|---|---|
 | Add | 64 × fp32, elementwise | **863** | 1053 (0.8×) | 1035 (0.8×) |
@@ -133,6 +215,36 @@ anterior ("Snitch vence tudo em fp32") não era uma verdade de hardware; era um
 artefato de o Spatz ainda rodar código de compilador. Conv2D continua com
 Snitch, simplesmente porque o Spatz ainda não tinha um kernel próprio para
 essa operação — a lacuna mais óbvia a fechar em seguida.
+
+### 6.7 Uma segunda descoberta, que não se deve confundir com a primeira
+
+"O GCC gerou código lento" e "o modelo do Spatz no GVSoC executava esse código
+*errado*" são achados diferentes, e o segundo veio junto por um motivo simples:
+código autovetorizado exercita o modelo muito mais do que os benchmarks
+escritos à mão que o próprio GVSoC acompanha, e alcança cantos da ISA que
+ninguém tinha pisado.
+
+O método para isolar esses casos foi sempre o mesmo, e é o oposto de depurar
+dentro do kernel: extrair a sequência exata que o GCC emitiu para um **probe
+mínimo em assembly**, com entradas conhecidas e os intermediários impressos
+(`runtime/tests/vec_probe.c`, `runtime/tests/smoke_convred.c`). Isso separa as
+duas perguntas que um resultado errado confunde — "o compilador emitiu a coisa
+errada" contra "o modelo executa a coisa certa de forma errada" — porque o probe
+é curto o bastante para se conferir a semântica à mão contra a especificação
+RVV.
+
+Quatro correções saíram daí, hoje em
+`deps/patches/gvsoc-core-rvv-extensions-and-fixes.patch`: instruções ausentes
+(`vsext`/`vzext`, `vwadd.w`, `vmv<nr>r.v`, e `vl<nr>r.v`/`vs<nr>r.v`, que eram
+`abort()`); `vtype` obsoleto em execução adiada, com o handler lendo a
+configuração que um `vsetvli` posterior já havia trocado; uma corrida de
+*writeback* em `vmv.x.s`, cujo destino inteiro não era escalonado; e rajadas da
+VLSU cruzando fronteira de banco na TCDM.
+
+A quarta é a mais instrutiva do conjunto: não deixava a simulação lenta nem a
+fazia falhar — **corrompia dados silenciosamente**, e apareceu como uma Conv2D
+que dava o número errado. É o tipo de defeito que só se encontra porque cada
+operador é conferido contra o onnxruntime, e não apenas cronometrado.
 
 ## 7. A SoC heterogênea completa (26–27/08)
 
