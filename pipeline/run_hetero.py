@@ -23,9 +23,11 @@ being mistaken for a slow one.
 import argparse
 import json
 import os
+import queue
 import re
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -165,6 +167,18 @@ def simulate(elfs: dict, run_dir: Path, total_nodes: int, timeout_s: int,
                             stdout = subprocess.PIPE, stderr = subprocess.STDOUT,
                             bufsize = 1)
 
+    # The simulator's output is read on a thread. A hung simulation is usually a
+    # silent one, and iterating the pipe here would block on a line that never
+    # comes, so the stall and timeout checks below would never get to run.
+    pending = queue.Queue()
+
+    def pump():
+        for raw in proc.stdout:
+            pending.put(raw)
+        pending.put(None)
+
+    threading.Thread(target = pump, daemon = True).start()
+
     prog = Progress(total_nodes, quiet)
     lines, result, caches = [], None, []
     mnist_result = None
@@ -173,7 +187,18 @@ def simulate(elfs: dict, run_dir: Path, total_nodes: int, timeout_s: int,
     t_start = time.time()
 
     try:
-        for line in proc.stdout:
+        while True:
+            if time.time() - prog.last_beacon > stall_s:
+                stalled = True
+                break
+            if time.time() - t_start > timeout_s:
+                break
+            try:
+                line = pending.get(timeout = 1)
+            except queue.Empty:
+                continue
+            if line is None:
+                break
             line = line.rstrip("\n")
             if line.startswith("WARNING"):
                 continue
@@ -207,12 +232,6 @@ def simulate(elfs: dict, run_dir: Path, total_nodes: int, timeout_s: int,
                 if not quiet:
                     sys.stdout.write("\r" + " " * 100 + "\r")
                 print(line)
-
-            if time.time() - prog.last_beacon > stall_s:
-                stalled = True
-                break
-            if time.time() - t_start > timeout_s:
-                break
     finally:
         prog.finish()
         if proc.poll() is None:
