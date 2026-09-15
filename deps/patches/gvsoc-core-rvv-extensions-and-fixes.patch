@@ -1,5 +1,5 @@
 diff --git a/models/cpu/iss/include/isa/rv32v_timed.hpp b/models/cpu/iss/include/isa/rv32v_timed.hpp
-index dc73c3b..428ece3 100644
+index dc73c3b..b1db49a 100644
 --- a/models/cpu/iss/include/isa/rv32v_timed.hpp
 +++ b/models/cpu/iss/include/isa/rv32v_timed.hpp
 @@ -1996,145 +1996,145 @@ static inline iss_reg_t vse64_v_exec(Iss *iss, iss_insn_t *insn, iss_reg_t pc)
@@ -254,8 +254,8 @@ index dc73c3b..428ece3 100644
 +{
 +    unsigned int sewb = iss->vector.sewb;
 +    unsigned int lmul = iss->vector.lmul;
-+    int64_t narrow = is_signed ? get_signed_value(REG_GET(0), 64, sewb * 8)
-+                               : (int64_t)(REG_GET(0) & (sewb == 8 ? ~0ULL : ((1ULL << (sewb * 8)) - 1)));
++    int64_t narrow = is_signed ? get_signed_value(RVV_REG_GET(0), 64, sewb * 8)
++                               : (int64_t)(RVV_REG_GET(0) & (sewb == 8 ? ~0ULL : ((1ULL << (sewb * 8)) - 1)));
 +    for (unsigned int i=VSTART; i<VEND; i++)
 +    {
 +        if (velem_is_active(iss, i, UIM_GET(0)))

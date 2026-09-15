@@ -1,7 +1,7 @@
 # hetero-sim: GVSoC simulation of CVA6/Snitch/Spatz, driven from ONNX via Deeploy.
 #
 # setup.sh fetches GVSoC/Deeploy at pinned commits and the RISC-V toolchain,
-# then builds all six GVSoC targets — that build is what this image bakes in,
+# then builds all ten GVSoC targets — that build is what this image bakes in,
 # so the container starts ready to run the pipeline on any host with Docker.
 FROM ubuntu:22.04
 
@@ -41,7 +41,7 @@ WORKDIR /workspace
 COPY . .
 
 # Fetches deps/gvsoc, deps/deeploy and the toolchain at the pinned commits in
-# setup.sh, applies the local GVSoC patches, and builds all six targets.
+# setup.sh, applies the local GVSoC patches, and builds all ten targets.
 RUN ./setup.sh
 
 ENV PATH="/workspace/.venv/bin:/workspace/toolchains/xpack-riscv-none-elf-gcc-15.2.0-1/bin:/workspace/deps/gvsoc/install/bin:${PATH}"

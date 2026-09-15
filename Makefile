@@ -9,7 +9,7 @@ MEM ?= real
 DBG := $(if $(DEBUG),--debug)
 TARGETS := cva6 snitch spatz cva6_real snitch_real spatz_real hetero_soc ara_v2 ara_host hetero_ara
 
-.PHONY: run gvsoc smoke ssr-test mesh-probe mesh-test hetero mnist kws clean
+.PHONY: run gvsoc smoke ssr-test ara-test mesh-probe mesh-test hetero mnist kws clean
 
 # Snitch bare-metal test build (the pipeline's snitch flags, minus the
 # generated network) used by the ssr-test target below.
@@ -55,6 +55,40 @@ ssr-test:
 	  (cd work/ssr-test && PATH="$(ROOT)/.venv/bin:$$PATH" $(ROOT)/$(GVSOC) \
 	    --target-dir=$(ROOT)/targets --target=snitch_real --binary=$$t.elf run \
 	    2>/dev/null | grep -v '^WARNING'); \
+	done
+
+# CVA6 + Ara vector host checks on ara_host. ara_probe: vector loads and stores
+# over the lengths, alignments and scalar interleavings compiled programs reach,
+# the strided and indexed accesses, vid.v and vsetvli zero, zero that the model
+# used to get wrong, and the instructions GCC's dense kernels are built from.
+# ara_kernels: Deeploy's integer GEMM vectorized with the host's kernel flags
+# against the same source built with no vector extension, element by element.
+# Same toolchain, glue and libraries as ssr-test. Each run is time-limited so a
+# hang fails instead of blocking; ARA_GVSOC_FLAGS passes extra options such as
+# traces through.
+ARA_ARCH := -march=rv64imafdcv_zicsr_zifencei -mabi=lp64d -mcmodel=medany \
+  -nostdlib -nostartfiles
+ARA_CFLAGS := $(ARA_ARCH) -O2 -fno-tree-vectorize -fno-tree-loop-distribute-patterns \
+  -Iruntime/common -Truntime/common/link.ld
+ARA_GENERIC := -Ideps/deeploy/TargetLibraries/Generic/inc -DDEEPLOY_GENERIC_PLATFORM
+ARA_GEMM_S8 := deps/deeploy/TargetLibraries/Generic/src/Gemm_s8.c
+ARA_TIMEOUT ?= 300
+ARA_GVSOC_FLAGS ?=
+ara-test:
+	@mkdir -p work/ara-test
+	$(SNITCH_CC) $(ARA_CFLAGS) $(SNITCH_GLUE) runtime/tests/ara_probe.c \
+	  $(SNITCH_LIBS) -o work/ara-test/ara_probe.elf
+	$(SNITCH_CC) $(ARA_ARCH) $(ARA_GENERIC) -O3 -ffast-math \
+	  -DGemm_s8_s8_s32_s32=Gemm_s8_vec -c $(ARA_GEMM_S8) -o work/ara-test/gemm_s8_vec.o
+	$(SNITCH_CC) -march=rv64imafdc_zicsr_zifencei -mabi=lp64d -mcmodel=medany -O2 \
+	  $(ARA_GENERIC) -DGemm_s8_s8_s32_s32=Gemm_s8_ref -c $(ARA_GEMM_S8) -o work/ara-test/gemm_s8_ref.o
+	$(SNITCH_CC) $(ARA_CFLAGS) $(SNITCH_GLUE) runtime/tests/ara_kernels.c \
+	  work/ara-test/gemm_s8_vec.o work/ara-test/gemm_s8_ref.o $(SNITCH_LIBS) \
+	  -o work/ara-test/ara_kernels.elf
+	@for t in ara_probe ara_kernels; do \
+	  (cd work/ara-test && PATH="$(ROOT)/.venv/bin:$$PATH" timeout $(ARA_TIMEOUT) \
+	    $(ROOT)/$(GVSOC) --target-dir=$(ROOT)/targets --target=ara_host \
+	    --binary=$$t.elf $(ARA_GVSOC_FLAGS) run 2>/dev/null | grep -v '^WARNING'); \
 	done
 
 # hetero_soc board check: do the three cores boot in one simulation, and does
