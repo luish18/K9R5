@@ -33,6 +33,7 @@
 
 #include <vp/vp.hpp>
 #include <vp/itf/io.hpp>
+#include <vp/debug_mem.hpp>
 
 #include <algorithm>
 #include <cstdio>
@@ -41,7 +42,7 @@
 // Tag value for a line that holds nothing.
 #define LINE_INVALID ((uint64_t)-1)
 
-class TimingCache : public vp::Component
+class TimingCache : public vp::Component, public vp::DebugMemIf
 {
 
 public:
@@ -49,6 +50,25 @@ public:
 
     void reset(bool active) override;
     void stop() override;
+
+    // --- Debug-memory backdoor -------------------------------------------
+    //
+    // The cache holds no data, so it has nothing of its own to serve here: it
+    // is transparent to a backdoor access exactly as it is to a request, and
+    // both simply forward to the next level. Being transparent matters beyond
+    // tidiness. The ISS v2 semi-hosting path reads its string arguments
+    // through this interface rather than through the data port
+    // (cpu/iss_v2/src/syscalls.cpp), resolving it by walking the LSU data port
+    // to the first component that offers one. With a cache in that path and no
+    // implementation here, that walk finds nothing, and every semi-hosted
+    // write is silently dropped -- a program that runs correctly and prints
+    // nothing.
+    vp::DebugMemIf *debug_mem_if() override { return this; }
+    int debug_mem_access(uint64_t addr, uint8_t *data, uint64_t size,
+        bool is_write) override;
+    void debug_mem_regions(std::vector<vp::DebugMemRegion> &regions,
+        uint64_t local_base, uint64_t window_size, uint64_t entry_base,
+        int depth) override;
 
 private:
     static vp::IoReqStatus req(vp::Block *__this, vp::IoReq *req);
@@ -63,6 +83,11 @@ private:
     // Looks up one line, allocating it (LRU victim) when it is missing. Returns
     // the cycle at which the line is readable, or -1 if the line was missing.
     int64_t lookup(uint64_t line, bool allocate, int64_t ready_time);
+
+    // Resolved lazily on first use and then remembered; see the definition.
+    vp::DebugMemIf *next_level_backdoor();
+    vp::DebugMemIf *backdoor = NULL;
+    bool backdoor_resolved = false;
 
     vp::Trace trace;
     vp::IoSlave input_itf;
@@ -101,6 +126,51 @@ private:
     uint64_t nb_miss;
     uint64_t nb_latency_cycles;
 };
+
+// The component behind the output port, if it offers a backdoor. The cache
+// applies no address translation, so nothing needs adjusting on the way.
+//
+// Resolved once and remembered. The walk is recursive over the binding graph,
+// and semi-hosting reads its strings a byte at a time, so resolving per access
+// makes every character printed cost a graph traversal -- which does not show
+// up on a short run and then dominates a long one.
+vp::DebugMemIf *TimingCache::next_level_backdoor()
+{
+    if (!this->backdoor_resolved)
+    {
+        this->backdoor_resolved = true;
+        std::vector<vp::SlavePort *> finals = this->output_itf.get_final_ports();
+        if (!finals.empty() && finals[0]->get_owner() != nullptr)
+        {
+            this->backdoor = finals[0]->get_owner()->debug_mem_if();
+        }
+    }
+    return this->backdoor;
+}
+
+int TimingCache::debug_mem_access(uint64_t addr, uint8_t *data, uint64_t size,
+    bool is_write)
+{
+    vp::DebugMemIf *next = this->next_level_backdoor();
+    if (next == NULL)
+    {
+        return -1;
+    }
+    return next->debug_mem_access(addr, data, size, is_write);
+}
+
+void TimingCache::debug_mem_regions(std::vector<vp::DebugMemRegion> &regions,
+    uint64_t local_base, uint64_t window_size, uint64_t entry_base, int depth)
+{
+    // Recurse rather than take the default, which would advertise the cache
+    // itself as a terminal region holding the data. It holds none.
+    vp::DebugMemIf *next = this->next_level_backdoor();
+    if (next != NULL)
+    {
+        next->debug_mem_regions(regions, local_base, window_size, entry_base,
+            depth + 1);
+    }
+}
 
 TimingCache::TimingCache(vp::ComponentConf &config)
     : vp::Component(config)

@@ -14,3 +14,6 @@ __pycache__/
 
 # Local harness settings
 .claude/settings.local.json
+
+# MNIST download cache, re-fetched by pipeline/mnist.py
+/ops/mnist/mnist.npz

@@ -18,9 +18,11 @@ TOOLCHAIN_VERSION=15.2.0-1
 TOOLCHAIN_DIR="toolchains/xpack-riscv-none-elf-gcc-${TOOLCHAIN_VERSION}"
 TOOLCHAIN_URL="https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/download/v${TOOLCHAIN_VERSION}/xpack-riscv-none-elf-gcc-${TOOLCHAIN_VERSION}-linux-x64.tar.gz"
 
-# GVSoC targets to build: the three stock ones (--memory ideal) and the three
-# in targets/ that model the memory system (--memory real, the default).
-TARGETS="cva6 snitch spatz cva6_real snitch_real spatz_real hetero_soc"
+# GVSoC targets to build: the three stock ones (--memory ideal), the three in
+# targets/ that model the memory system (--memory real, the default), the two
+# SoC boards (scalar and Ara vector host), and the standalone Ara host with the
+# stock ara_v2 board it is derived from.
+TARGETS="cva6 snitch spatz cva6_real snitch_real spatz_real hetero_soc ara_v2 ara_host hetero_ara"
 
 log() { printf '\n=== %s\n' "$1"; }
 
@@ -61,6 +63,12 @@ for patch in "$ROOT"/deps/patches/gvsoc-core-*.patch; do
   if git -C deps/gvsoc/core apply --reverse --check "$patch" 2>/dev/null; then
     echo "already applied: $name"
   else
+    if ! git -C deps/gvsoc/core apply --check "$patch" 2>/dev/null; then
+      echo "error: $name neither applies to deps/gvsoc/core nor is already applied." >&2
+      echo "  The checkout most likely carries an older version of the local patches;" >&2
+      echo "  reset them and re-run: git -C deps/gvsoc/core checkout -- . && ./setup.sh" >&2
+      exit 1
+    fi
     git -C deps/gvsoc/core apply "$patch"
     echo "applied: $name"
   fi
@@ -75,7 +83,7 @@ uv pip install -p .venv \
   -r deps/gvsoc/gapy/requirements.txt \
   ninja
 
-log "Building GVSoC (6 targets) — this takes a few minutes"
+log "Building GVSoC (10 targets) — this takes a few minutes"
 # The build drives gapy from the venv, so run it with the venv activated.
 # MODULES adds targets/ to the module roots, which is what lets the build see
 # the *_real targets and compile the timing-cache model that lives with them.

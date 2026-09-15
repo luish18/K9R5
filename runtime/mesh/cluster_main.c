@@ -31,6 +31,7 @@
 #include <stdint.h>
 
 #include "DeeployBasicMath.h"
+#include "mfcc.h"
 
 /* TCDM the linker left between .bss and the per-core stacks. */
 extern char __heap_start[];
@@ -42,9 +43,18 @@ extern char __heap_end[];
 static volatile uint32_t active_args[HES_MAILBOX_MAX_ARGS];
 static volatile uint32_t active_kernel;
 
+/* Scratch the running job's kernel needs per compute core, carved out of the
+ * TCDM heap by the DMA core before it stages anything. Only the MFCC front-end
+ * uses it -- it needs a complex spectrum and a mel vector per core, which are
+ * working storage rather than operands and so never cross the mailbox.
+ * Published before the barrier, so a compute core reading them after it is
+ * released sees what the DMA core wrote. */
+static volatile uint32_t scratch_base;   /* 0 if the kernel needs none */
+static volatile uint32_t scratch_stride; /* bytes per compute core */
+
 /* The pointer arguments of a job, as parallel arrays: which argument slot,
  * whether the kernel writes it, and how many bytes it covers. */
-#define MAX_OPERANDS 4
+#define MAX_OPERANDS 8
 
 typedef struct {
   uint32_t n;
@@ -114,9 +124,64 @@ static void plan_operands(uint32_t kernel, volatile uint32_t *a, operands_t *o) 
     }
     break;
   }
+  case HES_K_MFCC_FP32: {
+    uint32_t frames = a[HES_MFCC_NB_FRAMES], hop = a[HES_MFCC_HOP];
+    uint32_t frame_len = a[HES_MFCC_FRAME_LEN], fft_len = a[HES_MFCC_FFT_LEN];
+    uint32_t nb_mel = a[HES_MFCC_NB_MEL], nb_cep = a[HES_MFCC_NB_CEP];
+    /* Only the samples these frames actually reach. */
+    uint32_t samples = (frames - 1u) * hop + frame_len;
+    op_add(o, HES_MFCC_AUDIO, 0, samples * f);
+    op_add(o, HES_MFCC_OUT, 1, frames * nb_cep * f);
+    op_add(o, HES_MFCC_WINDOW, 0, frame_len * f);
+    op_add(o, HES_MFCC_TWIDDLES, 0, fft_len * f);
+    op_add(o, HES_MFCC_MEL_COEFF, 0, a[HES_MFCC_MEL_COEFFS] * f);
+    op_add(o, HES_MFCC_MEL_START, 0, nb_mel * sizeof(uint16_t));
+    op_add(o, HES_MFCC_MEL_LEN, 0, nb_mel * sizeof(uint16_t));
+    op_add(o, HES_MFCC_DCT, 0, nb_cep * nb_mel * f);
+    break;
+  }
   default:
     break;
   }
+}
+
+/* Per-core scratch this kernel needs, in bytes. Zero for the kernels whose
+ * working storage fits their own registers. */
+static uint32_t plan_scratch(uint32_t kernel, volatile uint32_t *a) {
+  if (kernel != HES_K_MFCC_FP32) {
+    return 0;
+  }
+  return MFCC_SCRATCH_ELEMS(a[HES_MFCC_FFT_LEN], a[HES_MFCC_NB_MEL])
+         * sizeof(float32_t);
+}
+
+/* Carve this job's per-core scratch off the bottom of the TCDM heap and return
+ * the cursor operand staging may start from.
+ *
+ * Scratch is working storage, not an operand: nothing is copied into it or out
+ * of it, so it costs heap but no DMA. It is reserved whether or not the
+ * operands are staged, because a kernel that needs it needs it either way.
+ * Only the DMA core may call this, before the barrier that releases the
+ * compute cores -- which is what publishes the two globals to them. */
+static uint32_t reserve_scratch(uint32_t kernel, volatile uint32_t *a,
+                                uint32_t nb_compute) {
+  uint32_t cursor = ((uint32_t)(uintptr_t)__heap_start + 63u) & ~63u;
+  uint32_t per_core = plan_scratch(kernel, a);
+
+  scratch_base = 0;
+  scratch_stride = 0;
+  if (per_core == 0) {
+    return cursor;
+  }
+
+  /* Keep each core's slab 64-byte aligned, so no two cores share a line. */
+  per_core = (per_core + 63u) & ~63u;
+  if (cursor + per_core * nb_compute > (uint32_t)(uintptr_t)__heap_end) {
+    return cursor; /* the caller turns this into HES_ERR_NO_SCRATCH */
+  }
+  scratch_base = cursor;
+  scratch_stride = per_core;
+  return cursor + per_core * nb_compute;
 }
 
 /* Copy every operand into TCDM scratch and point the active arguments at the
@@ -124,13 +189,12 @@ static void plan_operands(uint32_t kernel, volatile uint32_t *a, operands_t *o) 
  * which case the kernel runs against main memory instead. Only the DMA core
  * may call this: it alone has the offload port to the cluster iDMA. */
 static uint32_t stage_in(uint32_t kernel, volatile uint32_t *args,
-                         operands_t *o) {
+                         operands_t *o, uint32_t cursor) {
   plan_operands(kernel, args, o);
   if (o->n == 0) {
     return 0;
   }
 
-  uint32_t cursor = (uint32_t)(uintptr_t)__heap_start;
   uint32_t limit = (uint32_t)(uintptr_t)__heap_end;
 
   for (uint32_t i = 0; i < o->n; i++) {
@@ -230,6 +294,30 @@ static void run_slice(uint32_t kernel, volatile uint32_t *a, uint32_t idx,
         (float32_t *)(uintptr_t)(a[HES_CONV_Y] + first * H_out * W_out * f));
     break;
   }
+  case HES_K_MFCC_FP32: {
+    uint32_t frames = a[HES_MFCC_NB_FRAMES], hop = a[HES_MFCC_HOP];
+    uint32_t nb_cep = a[HES_MFCC_NB_CEP];
+    const uint32_t f = sizeof(float32_t);
+    uint32_t first, last;
+    /* Frames: independent of each other, and both `audio` and `out` are
+     * frame-major, so a core's share is a pointer offset into each. */
+    slice(frames, idx, nb, &first, &last);
+    if (first >= last) {
+      return;
+    }
+    Mfcc_fp32_fp32(
+        (const float32_t *)(uintptr_t)(a[HES_MFCC_AUDIO] + first * hop * f),
+        (float32_t *)(uintptr_t)(a[HES_MFCC_OUT] + first * nb_cep * f),
+        last - first, a[HES_MFCC_FRAME_LEN], hop, a[HES_MFCC_FFT_LEN],
+        (const float32_t *)(uintptr_t)a[HES_MFCC_WINDOW],
+        (const float32_t *)(uintptr_t)a[HES_MFCC_TWIDDLES],
+        (const float32_t *)(uintptr_t)a[HES_MFCC_MEL_COEFF],
+        (const uint16_t *)(uintptr_t)a[HES_MFCC_MEL_START],
+        (const uint16_t *)(uintptr_t)a[HES_MFCC_MEL_LEN], a[HES_MFCC_NB_MEL],
+        (const float32_t *)(uintptr_t)a[HES_MFCC_DCT], nb_cep,
+        (float32_t *)(uintptr_t)(scratch_base + idx * scratch_stride));
+    break;
+  }
   default:
     break;
   }
@@ -284,8 +372,12 @@ int main(void) {
       }
       staged = 0;
       ops.n = 0;
+      /* Working storage first: a kernel that needs it needs it whether or not
+       * its operands turn out to fit. */
+      uint32_t cursor = reserve_scratch(active_kernel, mbox->args, nb_compute);
+      uint32_t want_scratch = plan_scratch(active_kernel, mbox->args) != 0;
       if (mbox->flags & HES_JOB_STAGE) {
-        staged = stage_in(active_kernel, mbox->args, &ops);
+        staged = stage_in(active_kernel, mbox->args, &ops, cursor);
         if (!staged) {
           /* Did not fit: put the main-memory pointers back. */
           for (uint32_t i = 0; i < HES_MAILBOX_MAX_ARGS; i++) {
@@ -298,6 +390,11 @@ int main(void) {
        * job instead, and say so. */
       if (HES_MY_REQUIRES_STAGING && !staged) {
         mbox->error = HES_ERR_NEEDS_STAGING;
+        active_kernel = HES_K_NONE;
+      } else if (want_scratch && scratch_base == 0) {
+        /* Running without the working storage the kernel needs would write
+         * through a null pointer, so refuse rather than trap. */
+        mbox->error = HES_ERR_NO_SCRATCH;
         active_kernel = HES_K_NONE;
       } else {
         mbox->error = 0;

@@ -2,6 +2,7 @@
   "op": "Kernels_FP32_MatMul",
   "mapping": {
     "pin": null,
+    "host": "cva6",
     "nodes": [
       {
         "node": "matmul_node",
@@ -18,14 +19,14 @@
         "node": 0,
         "op": "MatMul",
         "engine": "spatz",
-        "cycles": 6117
+        "cycles": 7468
       }
     ],
     "per_engine_cycles": {
-      "spatz": 6117
+      "spatz": 7468
     },
     "waits": [],
-    "cycles": 7502,
+    "cycles": 9073,
     "errors": 0,
     "outputs": 256,
     "maxdiff": 0.0,
@@ -33,21 +34,21 @@
     "caches": [
       {
         "cache": "icache",
-        "accesses": 3244,
-        "misses": 58,
-        "latency_cycles": 6602
+        "accesses": 1095,
+        "misses": 62,
+        "latency_cycles": 6979
       },
       {
         "cache": "dcache",
-        "accesses": 2390,
-        "misses": 1009,
-        "latency_cycles": 59336
+        "accesses": 2437,
+        "misses": 1018,
+        "latency_cycles": 60343
       },
       {
         "cache": "l2",
-        "accesses": 1190,
-        "misses": 306,
-        "latency_cycles": 56549
+        "accesses": 1221,
+        "misses": 311,
+        "latency_cycles": 54432
       }
     ]
   }

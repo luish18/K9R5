@@ -35,6 +35,14 @@ LINK_LIBS = ["-Wl,--gc-sections", "-Wl,--allow-multiple-definition", "-lc", "-lm
 # Shared include path for every image in a run.
 INCS = [RUNTIME / "common", MESH, GENERIC_LIB / "inc"]
 
+# First-party kernels every image gets, on the same terms as the Deeploy
+# Generic library: compiled with the image's kernel flags (so a vector core
+# autovectorizes them) and subject to the same link-time rename, so a core with
+# a hand-written version takes the name and this one stays reachable as
+# <name>_generic. The MFCC front-end lives here because all three engines have
+# to be able to run it -- that is the whole point of measuring where it belongs.
+COMMON_KERNELS = sorted((RUNTIME / "common" / "kernels").glob("*.c"))
+
 
 class Image:
     """One of the three binaries a hetero_soc run needs.
@@ -68,6 +76,9 @@ class Image:
         return [f"-I{p}" for p in INCS + self.extra_incs]
 
 
+# The scalar orchestrator, and the same orchestrator with an Ara vector unit.
+# The vector one adds `v` to the march and vectorizes its kernels; glue stays
+# scalar through GLUE_FLAGS either way.
 HOST = Image(
     name="host",
     # The host keeps the C extension: unlike the clusters it has no decoupled
@@ -91,7 +102,7 @@ SNITCH = Image(
     extra_incs=[RUNTIME / "snitch"],
     kernel_srcs=sorted((RUNTIME / "snitch" / "kernels").glob("*.c")),
     kernel_overrides=["MatMul_fp32_fp32_fp32", "Gemm_fp32_fp32_fp32_fp32",
-                      "Conv2d_fp32_fp32_fp32_NCHW"],
+                      "Conv2d_fp32_fp32_fp32_NCHW", "Mfcc_fp32_fp32"],
 )
 
 SPATZ = Image(
@@ -111,7 +122,20 @@ SPATZ = Image(
     kernel_overrides=["MatMul_fp32_fp32_fp32", "Gemm_fp32_fp32_fp32_fp32"],
 )
 
+HOST_ARA = Image(
+    name="host",
+    march="rv64imafdc_zicsr_zifencei_v",
+    mabi="lp64d",
+    linker=MESH / "host.ld",
+    crt0=MESH / "crt0_host.S",
+    defines=["-DHES_HOST"],
+    kernel_flags=["-O3", "-ffast-math"],
+)
+
 IMAGES = {img.name: img for img in (HOST, SNITCH, SPATZ)}
+
+# Which orchestrator a run uses, and the board that matches it.
+HOSTS = {"cva6": (HOST, "hetero_soc"), "ara": (HOST_ARA, "hetero_ara")}
 
 
 def build(image: Image, sources, out_dir: Path, opt="-O2", extra_flags=(),
@@ -140,6 +164,8 @@ def build(image: Image, sources, out_dir: Path, opt="-O2", extra_flags=(),
         # kernels and the code calling them keep the original names.
         compile_(sorted((GENERIC_LIB / "src").glob("*.c")),
                  image.kernel_flags + image.rename_flags(), "k")
+        compile_(COMMON_KERNELS,
+                 image.kernel_flags + image.rename_flags(), "common")
         compile_(image.kernel_srcs, image.kernel_flags, "core")
 
     r = sh([str(TC), *image.arch_flags(), *COMMON_FLAGS, f"-T{image.linker}",
@@ -168,25 +194,39 @@ def build_test(test: str, work: Path, cluster_src=None, host_extra=()) -> dict:
     }
 
 
-def build_network(gen_dir: Path, work: Path, samples: int = 1) -> dict:
+def build_network(gen_dir: Path, work: Path, samples: int = 1,
+                  host_main: Path = None, extra_incs = (), host: str = "cva6",
+                  extra_defines = ()) -> dict:
     """Build the three ELFs for a Deeploy-generated network.
 
     The host links the generated Network.c, the host runtime and the Generic
     kernel library -- it runs the nodes the mapper left on it. Each cluster
     links the job loop and its own kernels.
+
+    `host_main` selects the host program: the default runs the graph once and
+    diffs it against the ONNX reference, while an op that ships its own
+    evaluation set (MNIST, KWS) supplies one that loops over it and scores.
+
+    `extra_defines` reaches only the host, which is where an application's
+    build-time choices live -- KWS uses it for the front-end's cluster and for
+    the serial baseline.
     """
+    if host_main is None:
+        host_main = MESH / "host_main.c"
     host_sources = [
         RUNTIME / "common" / "syscalls.c",
         MESH / "hes_host.c",
-        MESH / "host_main.c",
+        host_main,
         gen_dir / "Network.c",
     ]
     cluster_src = MESH / "cluster_main.c"
-    incs = [f"-I{gen_dir}"]
+    incs = [f"-I{gen_dir}", *[f"-I{p}" for p in extra_incs]]
 
+    host_image = HOSTS[host][0]
     return {
-        "host": build(HOST, host_sources, work / "host", with_kernels = True,
-                      extra_flags = [*incs, f"-DHES_SAMPLES={samples}"]),
+        "host": build(host_image, host_sources, work / "host", with_kernels = True,
+                      extra_flags = [*incs, f"-DHES_SAMPLES={samples}",
+                                     *extra_defines]),
         "snitch": build(SNITCH, [cluster_src], work / "snitch", with_kernels = True),
         "spatz": build(SPATZ, [cluster_src], work / "spatz", with_kernels = True),
     }

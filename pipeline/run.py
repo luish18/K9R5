@@ -82,6 +82,26 @@ CORES = {
         linker=RUNTIME / "common" / "link.ld",
         kernel_flags=["-O3"],
     ),
+    # The same CVA6 host with the ara_v2 vector unit attached (targets/
+    # ara_host.py). Opt in with --cores cva6,ara to compare the orchestrator
+    # with and without vector hardware on identical source; it is not in the
+    # default set, so the committed baselines are unaffected.
+    #
+    # There is no zero-latency variant of this board, so --memory ideal runs
+    # the same modelled-memory target and its cycles are not comparable with
+    # the other cores' ideal numbers.
+    "ara": Core(
+        name="ara",
+        targets={"real": "ara_host", "ideal": "ara_host"},
+        march="rv64imafdc_zicsr_zifencei_v",
+        mabi="lp64d",
+        linker=RUNTIME / "common" / "link.ld",
+        # -ffast-math is what lets GCC vectorize the FP reductions in the
+        # Generic kernels. Glue stays scalar via GLUE_FLAGS: with `v` in the
+        # march GCC will otherwise emit RVV for ordinary control loops, which
+        # is how the cluster staging plan was corrupted during M2.
+        kernel_flags=["-O3", "-ffast-math"],
+    ),
     "snitch": Core(
         name="snitch",
         targets={"real": "snitch_real", "ideal": "snitch"},

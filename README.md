@@ -11,6 +11,7 @@ ONNX op + inputs  ──Deeploy──►  C code  ──riscv-gcc──►  3 EL
 | cva6   | CVA6 64-bit host core, L1 I$/D$ + L2 + DRAM          | `cva6_real` (in `targets/`) | rv64imafdc |
 | snitch | Snitch integer core + FP subsystem, SSR streamers and FREP sequencer, data in cluster TCDM | `snitch_real` (in `targets/`) | rv32imafd + Xssr/Xfrep |
 | spatz  | Snitch + Spatz vector unit (4 lanes), RVV kernels    | `spatz_real` (in `targets/`) | rv32imafd + V |
+| ara    | the CVA6 host with an Ara vector unit (vlen 4096, 4 lanes), autovectorized kernels; opt-in with `--cores` | `ara_host` (in `targets/`) | rv64imafdc + V |
 
 Each core runs the best code the pipeline can give it, not the same code: CVA6
 scalar `-O3`, and both accelerator cores' FP kernels hand-written against what
@@ -119,17 +120,20 @@ like.
 Cycles for the timed op, one core of each type, on the default modelled-memory
 targets. `×` is against CVA6; the fastest core in each row is in bold. Every
 row is verified against the ONNX reference and reproduced by
-`results/<op>.json`.
+`results/<op>.json`. The `ara` column is the CVA6 host with its Ara vector unit,
+opt-in with `--cores cva6,ara` — see [The vector host](#the-vector-host-cva6--ara).
 
-| operator | shape | cva6 | snitch | spatz |
-|----------|-------|------|--------|-------|
-| Add                | 64 × fp32, elementwise                       | **863**  | 1053 (0.8×)        | 1035 (0.8×)      |
-| MatMul             | 2 × (16×32 · 32×8) fp32                      | 119.0k   | 12.6k (9.4×)       | **6.8k (17.5×)** |
-| MatMul (custom op) | 32×32×32 fp32                                | 477.5k   | 43.1k (11.1×)      | **7.5k (63.3×)** |
-| GEMM               | 32×32×32 fp32 + bias                         | 489.0k   | 43.5k (11.2×)      | **8.4k (58.5×)** |
-| GEMM (int8)        | 32×32×32, s8·s8 → s32                        | 575.9k   | 451.7k (1.3×)      | **84.1k (6.8×)** |
-| Conv2D + bias      | 2×64×32 fp32, 4 filters 2×8×8, stride 2×4    | 1.86M    | **173.9k (10.7×)** | 457.0k (4.1×)    |
-| Softmax            | 512 fp32, 32 rows of 16                      | 36.5k    | 51.0k (0.7×)       | **32.5k (1.1×)** |
+| operator | shape | cva6 | snitch | spatz | ara |
+|----------|-------|------|--------|-------|-----|
+| Add                | 64 × fp32, elementwise                       | **863**  | 1053 (0.8×)        | 1035 (0.8×)      | 1061 (0.8×)       |
+| MatMul             | 2 × (16×32 · 32×8) fp32                      | 119.0k   | 12.6k (9.4×)       | **6.8k (17.5×)** | 74.5k (1.6×)      |
+| MatMul (custom op) | 32×32×32 fp32                                | 477.5k   | 43.1k (11.1×)      | **7.5k (63.3×)** | 291.2k (1.6×)     |
+| GEMM               | 32×32×32 fp32 + bias                         | 489.0k   | 43.5k (11.2×)      | **8.4k (58.5×)** | 296.5k (1.6×)     |
+| GEMM (int8)        | 32×32×32, s8·s8 → s32                        | 575.9k   | 451.7k (1.3×)      | **84.1k (6.8×)** | 276.9k (2.1×)     |
+| Conv2D + bias      | 2×64×32 fp32, 4 filters 2×8×8, stride 2×4    | 1.86M    | **173.9k (10.7×)** | 457.0k (4.1×)    | 2.93M (0.6×)      |
+| Softmax            | 512 fp32, 32 rows of 16                      | 36.5k    | 51.0k (0.7×)       | 32.5k (1.1×)     | **31.3k (1.2×)**  |
+| ReLU               | 2×8×8 fp32, elementwise                      | 1695     | 2071 (0.8×)        | 584 (2.9×)       | **530 (3.2×)**    |
+| MaxPool 2D         | 16×16 → 8×8 fp32, 3×3 window, stride 2       | 23.4k    | 17.2k (1.4×)       | **10.9k (2.2×)** | 11.3k (2.1×)      |
 
 Reading it:
 
@@ -145,12 +149,17 @@ Reading it:
 - **Spatz takes int8 GEMM**, by 5.4× over Snitch: SSR feeds the FP regfile and
   FREP replays FP instructions, so neither helps an integer reduction, while
   RVV vectorizes it directly.
-- **Softmax is `expf`-bound** on all three, so they land within 1.6× of each
-  other and no amount of streaming or vectorizing moves it. Snitch is last
+- **Softmax is `expf`-bound** on every core, so they land within 1.7× of each
+  other and no amount of streaming or vectorizing moves it much. Snitch is last
   because the libm code is scalar work on its small integer core, and FREP
   replays FP instructions from a 16-entry buffer, not a libm call.
 - **Add is too small to say anything** — 64 elements, where the result is
   dominated by call and loop overhead rather than the 64 additions.
+- **The vector host is not a fourth accelerator.** It gains most on the work a
+  network leaves on the host — ReLU 3.2×, MaxPool and int8 GEMM 2.1× — and
+  loses Conv2D (0.6×): GCC reads the convolution window through a gather, and
+  the Ara unit issues a gather one element per bus burst. On every dense fp32
+  op Spatz is still 11-39× ahead of it.
 
 The dividing line between the two accelerated cores is not integer versus
 float. It is whether the work reduces to a dense FP multiply-accumulate loop
@@ -164,6 +173,198 @@ once its instruction fetches stop paying DRAM. The cost of the modelled memory
 system per core is broken down under
 [What it costs](#what-it-costs).
 
+## Keyword spotting: using both clusters at once
+
+The table above, and the MNIST network built on it, measure one thing: which
+core is fastest at a given operator. That is operator selection, and it leaves
+two things on the table. MNIST gives the Snitch cluster **zero** cycles — the
+cost model correctly sends every dense node to Spatz — and `hes_offload()`
+blocks, so even when two clusters could work at once they take turns and the
+total is a sum rather than a maximum.
+
+`ops/kws` is an application built to need both. It is keyword spotting on
+synthetic speech, and it has two stages that want different hardware and are
+available at the same time:
+
+```
+ clip N+1 ─┐
+           ▼
+   [SNITCH cluster]  window → FFT → |·|² → mel → log → DCT      one job, 8 cores,
+           │         (HES_K_MFCC_FP32)                          sliced by frame
+           ▼  features 32×13   (main memory, double-buffered)
+   [SPATZ cluster]   Conv 3×3 → Conv 3×3 → Gemm → Gemm          Deeploy-generated,
+           │                                                    existing kernels
+           ▼  logits
+   [CVA6]            ReLU / MaxPool / Softmax / argmax / control
+
+ t0:  snitch(clip 0)
+ t1:  snitch(clip 1)  ||  spatz+cva6(clip 0)      ← both clusters live
+ t2:  snitch(clip 2)  ||  spatz+cva6(clip 1)
+```
+
+Because clips keep arriving, the front-end for clip N+1 is independent of the
+classifier for clip N. `runtime/mesh/kws_main.c` posts the one before running
+the other, and collects it after. `RunNetwork()` offloads its Conv and Gemm
+nodes to a *different* cluster's mailbox, so the overlap needs nothing from the
+generated code — only that `hes_offload()` be split into `hes_post()` +
+`hes_wait()`, which is all `runtime/mesh/hes_host.c` changed. Each cluster
+already had its own `seq`/`done_seq` pair; one job per cluster in flight was
+always expressible, `hes_offload()` just never used it.
+
+Run it with `make kws`. 16 clips, all numbers from the modelled-memory board:
+
+| | cycles/clip | vs. pipelined |
+|---|---|---|
+| front-end on snitch, classifier on spatz | **256,652** | — |
+| the same work, serial (`SERIAL=1`) | 468,217 | 1.82× slower |
+| front-end on spatz, classifier on snitch (`FE=spatz PIN=snitch`) | 269,436 | 1.05× slower |
+| classifier on the host (`PIN=cva6`, 8 clips) | 1,539,711 | 6.0× slower |
+
+and, for the first time in this repository, all three engines do real work:
+
+| engine | cycles (16 clips) | share | |
+|---|---|---|---|
+| snitch | 3,614,890 | 50.2% | the MFCC front-end |
+| spatz | 1,831,164 | 25.4% | Conv and Gemm |
+| cva6 | 1,755,330 | 24.4% | ReLU, MaxPool, Softmax, control |
+
+against MNIST's `spatz 53% / cva6 47% / snitch 0%`. 93.4% of the front-end's
+cycles overlap the classifier and cost no wall time at all.
+
+### What the placement comparison says
+
+The two rows in the middle of the first table are the same work with the two
+stages swapped between the clusters, and the interesting part is that Spatz is
+faster at **both** stages and still loses:
+
+| stage | on snitch | on spatz | |
+|---|---|---|---|
+| MFCC front-end | 225.9k/clip | **185.6k/clip** | spatz, 1.22× |
+| classifier (cluster share) | 129.8k/clip | **114.4k/clip** | spatz, 1.13× |
+
+The two stages have to be on different clusters — a cluster's mailbox holds one
+descriptor, so posting the next front-end to the cluster the classifier is using
+would overwrite a job in flight, which `hes_post()` refuses and
+`pipeline/run_hetero.py` catches before the build. So the choice is which stage
+gets Spatz, and a pipeline's period is the *maximum* of its stages, not their
+sum. The classifier is the slower stage under either assignment, so Spatz
+belongs on the classifier and the front-end goes to Snitch by elimination.
+"Put each stage on the core that runs it fastest" is not the rule; "give the
+better core to the stage that sets the period" is.
+
+### What the SSR front-end kernel does and does not buy
+
+`runtime/snitch/kernels/mfcc_fp32_ssr.c` streams two of the four stages, and
+they are the two the access-pattern argument rests on:
+
+- the **mel filterbank** — 40 reductions, each over its own ragged 10–30 bin
+  run. Short vectors *and* a horizontal reduction per filter is the worst case
+  for RVV; for SSR the data-dependent trip count is just a register, and the
+  accumulators stay live across the whole filter.
+- the **DCT-II** — a small dense matrix-vector product, the same block shape as
+  the GEMM kernel's inner loop.
+
+It is worth 8.2% of the front-end (992.5k → 911.6k cycles over 4 clips), and no
+more, because the FFT dominates and is **not** streamed. Its butterfly wants
+four reads and four writes per iteration against three data movers, so streaming
+it means splitting it into passes through a scratch buffer, and whether that
+costs less than the loads it removes is a real question rather than a rhetorical
+one. It is left open. That is also why Spatz wins the front-end above: the
+measurement does not support the a-priori claim that the front-end is
+Snitch-shaped work, and the claim is reported as refuted rather than quietly
+dropped. A hand-written RVV front-end for Spatz — which does not exist either —
+would likely widen its lead further.
+
+### How it is checked
+
+Three independent checks, and a misheard keyword is not one of them:
+
+- every clip's prediction against **onnxruntime** on the same graph — 16/16, the
+  same discipline `mnist_main.c` uses;
+- every clip's **features** against the numpy front-end in `pipeline/kws.py`,
+  embedded in `ops/kws/kws_data.h`. Max |chip − numpy| = 5×10⁻⁶. Without this a
+  wrong FFT would only ever surface as a misclassification;
+- `make ssr-test` runs `runtime/tests/ssr_mfcc.c`, which compares the streamed
+  filterbank and DCT against a scalar reference on the ragged filter widths and
+  cepstra counts the application never reaches — bit-identical on all five.
+
+The audio is synthesized procedurally from formant templates (no download, no
+new dependency), so the 98.8% test accuracy says the network trained, not that
+the model competes with Speech Commands. What is being measured is the chip.
+
+## The vector host (CVA6 + Ara)
+
+The orchestrator can carry a vector unit of its own.
+[`targets/ara_host.py`](targets/ara_host.py) is the `cva6_real` board with
+GVSoC's Ara unit attached to the CVA6 — ISS v2, `vlen` 4096, 4 lanes × 8 B,
+vector loads and stores going through the same cache hierarchy as scalar data —
+and [`targets/hetero_ara.py`](targets/hetero_ara.py) is `hetero_soc` with that
+core as orchestrator: the same Snitch cluster, Spatz pair, memory system and
+addresses.
+
+```bash
+.venv/bin/python pipeline/run.py <op> --cores cva6,ara   # the host with and without its vector unit
+make mnist HOST=ara                                     # the SoC with the vector host
+make kws HOST=ara
+make ara-test                                           # the checks the model fixes rest on
+```
+
+`ara` is opt-in and `HOST` defaults to `cva6`, so every number outside this
+section and the `ara` column in [Results](#results) is the scalar host.
+
+### What it buys
+
+Per core, the `ara` column: 3.2× on ReLU, 2.1× on MaxPool and int8 GEMM, 1.6× on
+the dense fp32 ops, 0.6× on Conv2D. On the SoC, on the same inputs as the
+scalar-host runs and verified against onnxruntime:
+
+| | scalar host | vector host | |
+|---|---|---|---|
+| MNIST, cycles/image (16 images) | 572,820 | **437,272** | 1.31× |
+| host share of the MNIST run | 46.7% | 30.2% | |
+| KWS, cycles/clip (16 clips) | 256,652 | **237,722** | 1.08× |
+| host cycles in the KWS run | 1,755,330 | 846,548 | 2.07× |
+
+MNIST also classifies all 64 images of its evaluation set on the vector host,
+64/64 agreeing with onnxruntime. The placement does not change: Conv and Gemm
+stay on Spatz, while ReLU, MaxPool and Softmax — the half of MNIST neither
+cluster has kernels for — get faster in place, which is what the vector host is
+for. KWS gains less because its period is set by the MFCC front-end on Snitch,
+which the host does not run.
+
+The mapper prices the vector host by its own measured rates (`RATES["ara"]` in
+[`pipeline/hetero_platform/mapper.py`](pipeline/hetero_platform/mapper.py)),
+and its placement still beats both alternatives on either host (8 MNIST images,
+cycles/image):
+
+| placement | scalar host | vector host |
+|---|---|---|
+| Conv and Gemm on spatz — the mapper's choice | **576,078** | **439,089** |
+| Conv and Gemm on snitch | 621,456 | 485,313 |
+| every node on the host | 4,214,984 | 13,376,745 |
+
+The last row is the vector unit's weakness in one number: with the convolutions
+on the host it is 3.2× *slower* than the scalar host, because GCC reads the
+convolution window through a gather and the unit issues a gather one element
+per bus burst. The measured rates are what keep the mapper from putting them
+there.
+
+### How it is checked
+
+The Ara model computed wrong answers until five fixes, listed under
+[GVSoC model fixes](#ara-vector-host), and the checks that found them stay:
+
+- `make ara-test` runs `runtime/tests/ara_probe.c` — vector loads and stores
+  over lengths, alignments and scalar interleavings, gathers and strided
+  accesses, the vl and scalar-operand races, and each instruction GCC's dense
+  kernels are built from, all against scalar references — and
+  `runtime/tests/ara_kernels.c`, Deeploy's integer GEMM vectorized with the
+  host's kernel flags against the same source built without the vector
+  extension, element by element;
+- `pipeline/run.py --cores cva6,snitch,spatz,ara` verifies every op in the
+  Results table against the ONNX reference;
+- MNIST and KWS check every sample against onnxruntime, as on the scalar host.
+
 ## Layout
 
 ```
@@ -172,11 +373,18 @@ pipeline/run.py        the pipeline driver (codegen → build → simulate → r
 pipeline/make_op.py    wrap an ONNX model + inputs into a pipeline op directory
 runtime/               bare-metal glue: crt0, semihosting, linker scripts, bench main
 runtime/snitch/snitch_ssr.h    Xssr/Xfrep intrinsics as raw instruction encodings
-runtime/snitch/kernels/        the FP kernels Snitch overrides (MatMul/GEMM/Conv2d)
+runtime/snitch/kernels/        the FP kernels Snitch overrides (MatMul/GEMM/Conv2d/MFCC)
 runtime/spatz/kernels/         the FP kernels Spatz overrides, hand-written RVV
-runtime/tests/         standalone bare-metal checks (`make ssr-test` runs the SSR ones)
+runtime/common/kernels/        first-party kernels every core gets (the MFCC front-end)
+runtime/mesh/kws_main.c        keyword spotting: both clusters running at once
+pipeline/kws.py                synthesize the audio, train the classifier, export ops/kws
+runtime/tests/         standalone bare-metal checks (`make ssr-test` runs the SSR ones,
+                       `make ara-test` ara_probe.c and ara_kernels.c on the vector host)
 targets/*_real.py      GVSoC targets with the memory system modelled (the default)
 targets/cva6_ideal.py  GVSoC target with zero-latency memory (--memory ideal)
+targets/ara_host.py    CVA6 + Ara vector unit, modelled memory (--cores ara)
+targets/hetero_soc.py  the SoC: CVA6 host + Snitch cluster + Spatz pair (make hetero/mnist/kws)
+targets/hetero_ara.py  the same SoC with the vector host (HOST=ara)
 targets/hetero/        memory-system parameters + the timing-cache model (C++ and generator)
 deps/patches/          local fixes to GVSoC models (tracked; applied by setup.sh)
 deps/gvsoc             GVSoC checkout + build           (untracked)
@@ -460,6 +668,13 @@ capacity misses, store traffic and instruction refills, not the cold start.
   not used: every number is one core of each type. That is the largest
   remaining lever on the Snitch and Spatz numbers, and it needs a cluster
   runtime (barriers, DMA, per-core tiling) rather than a kernel rewrite.
+- The vector host's Ara unit reaches memory through the host's cache hierarchy
+  on a single port, and issues gathers and strided accesses one element per
+  burst. That is how the model is built rather than a property of every vector
+  core, and it is why Conv2D is slower on it. ISS v2's semi-hosting has been
+  seen to drop a string write and repeat the previous one, which garbles a log
+  line but never a result: the progress beacon carries its engine as a number
+  for that reason.
 
 ## GVSoC model fixes
 
@@ -495,3 +710,42 @@ fixes:
 4. **TCDM bank-crossing bursts** — the Spatz VLSU issued full-width bursts from
    misaligned addresses, crossing a bank boundary and silently corrupting data (this
    was the Conv2D failure). Bursts are now clamped at the interleave boundary.
+
+### Ara vector host
+
+`gvsoc-core-vector-host-ara.patch`. The CVA6 + Ara host hung once MNIST grew past
+16 images and returned wrong numbers on every kernel GCC vectorized densely. Each of
+these five was reproduced before it was fixed: the first by tracing the hung MNIST
+run, which the 64-image run on `hetero_ara` still exercises, and the other four by
+the `make ara-test` cases that guard them now.
+
+1. **Router bandwidth charged to debug accesses** — the timing cache fetches the
+   bytes of every hit from the level below as a debug access, and the router's
+   bandwidth limiter advanced its burst cyclestamp for those too. On the SoC boards,
+   where `wide_axi` is bandwidth-limited, hit traffic pushed the cyclestamp ahead of
+   simulated time; a CVA6 stalled on a full vector queue re-issues two fetches a
+   cycle, so every wait doubled the next — 8M, 16M, 33M, 67M cycles, which looked
+   like a hang. Debug accesses now cross a router without occupying its bandwidth.
+   Against the unfixed router this moves each committed scalar-host SoC run by
+   about 30 cycles.
+2. **`vid.v`** had no decoding at all, which was the MatMul illegal-instruction
+   trap.
+3. **Strided and indexed accesses** — the Ara VLSU issued every load and store as
+   one contiguous range from the base address, so `vlse`/`vsse` and the `vluxei`
+   gathers GCC builds matmul and convolution on read the wrong memory. They are now
+   issued an element per burst, the address advancing by the stride or read from
+   the offset vector, as the Spatz VLSU does.
+4. **`vsetvli zero, zero`** reset `vl` to VLMAX instead of keeping it: a write to
+   `x0` is decoded to a discard register at `ISS_NB_REGS`, so the handler never saw
+   `rd` as `x0`. It is the form a compiler uses to change SEW or LMUL mid-loop.
+5. **Scalar operands read late** — the vector unit runs an instruction some cycles
+   after the core issued it, and nine handlers read their scalar operand from the
+   live register instead of the value captured at dispatch. `vmv.v.x v9, t1` ran
+   after the core's `vsetvli t1, zero` and made the integer GEMM's B offset VLMAX.
+   Eight of the nine are fixed here; `vw_op_wx_exec`, which
+   `gvsoc-core-rvv-extensions-and-fixes.patch` added itself, is fixed in that patch
+   so it still reverse-applies.
+
+The last two are in handlers the Snitch and Spatz cores share. Every committed
+Snitch and Spatz result is unchanged to the cycle: neither core's code reached
+them.

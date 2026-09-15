@@ -2,6 +2,7 @@
   "op": "Kernels_FP32_GEMM_Regular",
   "mapping": {
     "pin": "snitch",
+    "host": "cva6",
     "nodes": [
       {
         "node": "",
@@ -12,20 +13,20 @@
   },
   "result": {
     "status": "ok",
-    "wall_s": 1.0,
+    "wall_s": 1.1,
     "nodes": [
       {
         "node": 0,
         "op": "Gemm",
         "engine": "snitch",
-        "cycles": 11647
+        "cycles": 12241
       }
     ],
     "per_engine_cycles": {
-      "snitch": 11647
+      "snitch": 12241
     },
     "waits": [],
-    "cycles": 13155,
+    "cycles": 13857,
     "errors": 0,
     "outputs": 1024,
     "maxdiff": 2e-06,
@@ -33,21 +34,21 @@
     "caches": [
       {
         "cache": "icache",
-        "accesses": 6148,
-        "misses": 59,
-        "latency_cycles": 6752
+        "accesses": 4585,
+        "misses": 63,
+        "latency_cycles": 7098
       },
       {
         "cache": "dcache",
-        "accesses": 3391,
-        "misses": 823,
-        "latency_cycles": 60701
+        "accesses": 3417,
+        "misses": 831,
+        "latency_cycles": 62321
       },
       {
         "cache": "l2",
-        "accesses": 989,
-        "misses": 337,
-        "latency_cycles": 53939
+        "accesses": 1009,
+        "misses": 342,
+        "latency_cycles": 50729
       }
     ]
   }

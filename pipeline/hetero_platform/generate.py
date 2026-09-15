@@ -63,12 +63,13 @@ def is_fp32_network(input_types) -> bool:
     return bool(input_types)
 
 
-def build_deployer(graph, input_types, input_offsets, state_dir, pin=None):
+def build_deployer(graph, input_types, input_offsets, state_dir, pin=None, host="cva6"):
     """A Generic deployer made engine-colour-aware, with the cost mapper.
 
     EngineColoringDeployerWrapper is Deeploy's own mechanism for this: it
     inserts the colouring pass around every lowering pass, and asserts at the
-    end that no node was left uncoloured.
+    end that no node was left uncoloured. `host` tells the mapper which
+    orchestrator it is placing for.
     """
     platform = HeteroPlatform(fp32_network = is_fp32_network(input_types))
     deployer = GenericDeployer(graph,
@@ -80,7 +81,7 @@ def build_deployer(graph, input_types, input_offsets, state_dir, pin=None):
                                default_channels_first = True,
                                deeployStateDir = state_dir,
                                inputOffsets = input_offsets)
-    return EngineColoringDeployerWrapper(deployer, make_mapper(pin))
+    return EngineColoringDeployerWrapper(deployer, make_mapper(pin, host))
 
 
 def main():
@@ -92,6 +93,9 @@ def main():
     ap.add_argument("--pin", default = None, choices = ["cva6", "snitch", "spatz"],
                     help = "force every node the engine can run onto it, instead "
                            "of letting the cost model choose")
+    ap.add_argument("--host", default = "cva6", choices = ["cva6", "ara"],
+                    help = "the orchestrator the board carries, which sets the "
+                           "rates the host engine is priced at (default: %(default)s)")
     args = ap.parse_args()
 
     test_dir = Path(args.test_dir)
@@ -120,7 +124,7 @@ def main():
         input_offsets[f"input_{i}"] = offset
 
     deployer = build_deployer(graph, input_types, input_offsets,
-                              str(dump_dir / "deeployStates"), args.pin)
+                              str(dump_dir / "deeployStates"), args.pin, args.host)
 
     # The code transformations run inside prepare(), after lowering and
     # colouring but before code generation, so the progress pass has to read
@@ -153,6 +157,7 @@ def main():
         placement.append({"node": name, "op": op, "engine": engine})
     (dump_dir / "mapping.json").write_text(json.dumps({
         "pin": args.pin,
+        "host": args.host,
         "nodes": placement,
     }, indent = 2))
 
