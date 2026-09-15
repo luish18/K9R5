@@ -164,6 +164,125 @@ once its instruction fetches stop paying DRAM. The cost of the modelled memory
 system per core is broken down under
 [What it costs](#what-it-costs).
 
+## Keyword spotting: using both clusters at once
+
+The table above, and the MNIST network built on it, measure one thing: which
+core is fastest at a given operator. That is operator selection, and it leaves
+two things on the table. MNIST gives the Snitch cluster **zero** cycles — the
+cost model correctly sends every dense node to Spatz — and `hes_offload()`
+blocks, so even when two clusters could work at once they take turns and the
+total is a sum rather than a maximum.
+
+`ops/kws` is an application built to need both. It is keyword spotting on
+synthetic speech, and it has two stages that want different hardware and are
+available at the same time:
+
+```
+ clip N+1 ─┐
+           ▼
+   [SNITCH cluster]  window → FFT → |·|² → mel → log → DCT      one job, 8 cores,
+           │         (HES_K_MFCC_FP32)                          sliced by frame
+           ▼  features 32×13   (main memory, double-buffered)
+   [SPATZ cluster]   Conv 3×3 → Conv 3×3 → Gemm → Gemm          Deeploy-generated,
+           │                                                    existing kernels
+           ▼  logits
+   [CVA6]            ReLU / MaxPool / Softmax / argmax / control
+
+ t0:  snitch(clip 0)
+ t1:  snitch(clip 1)  ||  spatz+cva6(clip 0)      ← both clusters live
+ t2:  snitch(clip 2)  ||  spatz+cva6(clip 1)
+```
+
+Because clips keep arriving, the front-end for clip N+1 is independent of the
+classifier for clip N. `runtime/mesh/kws_main.c` posts the one before running
+the other, and collects it after. `RunNetwork()` offloads its Conv and Gemm
+nodes to a *different* cluster's mailbox, so the overlap needs nothing from the
+generated code — only that `hes_offload()` be split into `hes_post()` +
+`hes_wait()`, which is all `runtime/mesh/hes_host.c` changed. Each cluster
+already had its own `seq`/`done_seq` pair; one job per cluster in flight was
+always expressible, `hes_offload()` just never used it.
+
+Run it with `make kws`. 16 clips, all numbers from the modelled-memory board:
+
+| | cycles/clip | vs. pipelined |
+|---|---|---|
+| front-end on snitch, classifier on spatz | **256,660** | — |
+| the same work, serial (`SERIAL=1`) | 468,232 | 1.82× slower |
+| front-end on spatz, classifier on snitch (`FE=spatz PIN=snitch`) | 269,434 | 1.05× slower |
+| classifier on the host (`PIN=cva6`, 8 clips) | 1,539,740 | 6.0× slower |
+
+and, for the first time in this repository, all three engines do real work:
+
+| engine | cycles (16 clips) | share | |
+|---|---|---|---|
+| snitch | 3,615,963 | 50.2% | the MFCC front-end |
+| spatz | 1,831,164 | 25.4% | Conv and Gemm |
+| cva6 | 1,755,332 | 24.4% | ReLU, MaxPool, Softmax, control |
+
+against MNIST's `spatz 53% / cva6 47% / snitch 0%`. 93.4% of the front-end's
+cycles overlap the classifier and cost no wall time at all.
+
+### What the placement comparison says
+
+The two rows in the middle of the first table are the same work with the two
+stages swapped between the clusters, and the interesting part is that Spatz is
+faster at **both** stages and still loses:
+
+| stage | on snitch | on spatz | |
+|---|---|---|---|
+| MFCC front-end | 226.0k/clip | **185.7k/clip** | spatz, 1.22× |
+| classifier (cluster share) | 129.8k/clip | **114.4k/clip** | spatz, 1.13× |
+
+The two stages have to be on different clusters — a cluster's mailbox holds one
+descriptor, so posting the next front-end to the cluster the classifier is using
+would overwrite a job in flight, which `hes_post()` refuses and
+`pipeline/run_hetero.py` catches before the build. So the choice is which stage
+gets Spatz, and a pipeline's period is the *maximum* of its stages, not their
+sum. The classifier is the slower stage under either assignment, so Spatz
+belongs on the classifier and the front-end goes to Snitch by elimination.
+"Put each stage on the core that runs it fastest" is not the rule; "give the
+better core to the stage that sets the period" is.
+
+### What the SSR front-end kernel does and does not buy
+
+`runtime/snitch/kernels/mfcc_fp32_ssr.c` streams two of the four stages, and
+they are the two the access-pattern argument rests on:
+
+- the **mel filterbank** — 40 reductions, each over its own ragged 10–30 bin
+  run. Short vectors *and* a horizontal reduction per filter is the worst case
+  for RVV; for SSR the data-dependent trip count is just a register, and the
+  accumulators stay live across the whole filter.
+- the **DCT-II** — a small dense matrix-vector product, the same block shape as
+  the GEMM kernel's inner loop.
+
+It is worth 8.2% of the front-end (992.5k → 911.6k cycles over 4 clips), and no
+more, because the FFT dominates and is **not** streamed. Its butterfly wants
+four reads and four writes per iteration against three data movers, so streaming
+it means splitting it into passes through a scratch buffer, and whether that
+costs less than the loads it removes is a real question rather than a rhetorical
+one. It is left open. That is also why Spatz wins the front-end above: the
+measurement does not support the a-priori claim that the front-end is
+Snitch-shaped work, and the claim is reported as refuted rather than quietly
+dropped. A hand-written RVV front-end for Spatz — which does not exist either —
+would likely widen its lead further.
+
+### How it is checked
+
+Three independent checks, and a misheard keyword is not one of them:
+
+- every clip's prediction against **onnxruntime** on the same graph — 16/16, the
+  same discipline `mnist_main.c` uses;
+- every clip's **features** against the numpy front-end in `pipeline/kws.py`,
+  embedded in `ops/kws/kws_data.h`. Max |chip − numpy| = 5×10⁻⁶. Without this a
+  wrong FFT would only ever surface as a misclassification;
+- `make ssr-test` runs `runtime/tests/ssr_mfcc.c`, which compares the streamed
+  filterbank and DCT against a scalar reference on the ragged filter widths and
+  cepstra counts the application never reaches — bit-identical on all five.
+
+The audio is synthesized procedurally from formant templates (no download, no
+new dependency), so the 98.8% test accuracy says the network trained, not that
+the model competes with Speech Commands. What is being measured is the chip.
+
 ## Layout
 
 ```
@@ -172,8 +291,11 @@ pipeline/run.py        the pipeline driver (codegen → build → simulate → r
 pipeline/make_op.py    wrap an ONNX model + inputs into a pipeline op directory
 runtime/               bare-metal glue: crt0, semihosting, linker scripts, bench main
 runtime/snitch/snitch_ssr.h    Xssr/Xfrep intrinsics as raw instruction encodings
-runtime/snitch/kernels/        the FP kernels Snitch overrides (MatMul/GEMM/Conv2d)
+runtime/snitch/kernels/        the FP kernels Snitch overrides (MatMul/GEMM/Conv2d/MFCC)
 runtime/spatz/kernels/         the FP kernels Spatz overrides, hand-written RVV
+runtime/common/kernels/        first-party kernels every core gets (the MFCC front-end)
+runtime/mesh/kws_main.c        keyword spotting: both clusters running at once
+pipeline/kws.py                synthesize the audio, train the classifier, export ops/kws
 runtime/tests/         standalone bare-metal checks (`make ssr-test` runs the SSR ones)
 targets/*_real.py      GVSoC targets with the memory system modelled (the default)
 targets/cva6_ideal.py  GVSoC target with zero-latency memory (--memory ideal)

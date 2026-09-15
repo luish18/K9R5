@@ -71,22 +71,22 @@ def im2col(x, k):
 
 
 def conv_forward(x, w, b, k):
-    n, _, h, _ = x.shape
-    oh = ow = h - k + 1
+    n, _, h, w_in = x.shape
+    oh, ow = h - k + 1, w_in - k + 1
     cols = im2col(x, k)                                  # (N, C*k*k, OH*OW)
     out = np.einsum("fj,njp->nfp", w.reshape(w.shape[0], -1), cols)
     return (out + b[None, :, None]).reshape(n, w.shape[0], oh, ow), cols
 
 
 def conv_backward(dout, cols, x_shape, w, k):
-    n, c, h, _ = x_shape
+    n, c, h, w_in = x_shape
     f = w.shape[0]
     do = dout.reshape(n, f, -1)                          # (N,F,P)
     dw = np.einsum("nfp,njp->fj", do, cols).reshape(w.shape)
     db = do.sum(axis = (0, 2))
     dcols = np.einsum("fj,nfp->njp", w.reshape(f, -1), do)
     # Scatter the columns back onto the input.
-    oh = ow = h - k + 1
+    oh, ow = h - k + 1, w_in - k + 1
     dx = np.zeros(x_shape, dtype = np.float32)
     dcols = dcols.reshape(n, c, k, k, oh, ow)
     for i in range(k):

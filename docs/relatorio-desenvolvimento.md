@@ -1,0 +1,576 @@
+# Relatório de desenvolvimento — hetero-sim
+
+Simulação de uma arquitetura RISC-V heterogênea (CVA6 + Snitch + Spatz) e
+classificação de MNIST rodando sobre ela. Este relatório narra o
+desenvolvimento em ordem cronológica e reproduz, para cada etapa relevante, a
+tabela de desempenho por núcleo medida naquele ponto — para que a evolução das
+decisões de projeto fique visível nos números, e não só na descrição.
+
+Todas as tabelas abaixo vêm de execuções reais no simulador GVSoC (não são
+estimativas), extraídas do histórico do repositório: das versões sucessivas de
+`README.md` e dos JSONs em `results/`.
+
+## 1. Objetivo do projeto
+
+Simular, em GVSoC, um chip heterogêneo com três tipos de núcleo RISC-V:
+
+- **CVA6** — núcleo host 64 bits, orquestrador, com hierarquia de cache
+  completa (L1 I$/D$ + L2 + DRAM).
+- **Snitch** — núcleo integer pequeno acoplado a um subsistema de ponto
+  flutuante desacoplado, com as extensões proprietárias **Xssr** (stream
+  semantic registers) e **Xfrep** (floating-point repeat), organizado em
+  cluster com scratchpad (TCDM).
+- **Spatz** — o mesmo núcleo Snitch, mas com uma unidade vetorial RVV de 4
+  lanes anexada, também em cluster.
+
+O fluxo é sempre o mesmo: um operador ONNX (ou uma rede inteira) entra pelo
+Deeploy, que gera código C; esse código é compilado para cada núcleo com o
+kernel mais adequado ao seu hardware; o binário roda no GVSoC; o pipeline
+recolhe ciclos, erro numérico contra a referência ONNX e contadores de cache.
+
+```
+ONNX op + inputs  ──Deeploy──►  C code  ──riscv-gcc──►  ELF(s)  ──GVSoC──►  métricas por núcleo
+```
+
+O objetivo original — atingido na seção 8 — era treinar uma CNN pequena,
+exportá-la para ONNX e classificar MNIST rodando a rede inteira sobre o chip
+simulado completo (host + os dois clusters), com o Deeploy decidindo
+automaticamente em qual núcleo cada nó do grafo roda.
+
+A seção 9 vai além dele, e por um motivo que só ficou visível depois que a
+tabela do MNIST existiu: escolher o melhor núcleo *por operação* não é o mesmo
+que usar a arquitetura heterogênea. Naquela tabela o cluster Snitch executa
+zero ciclos, e os dois clusters nunca trabalham ao mesmo tempo. O último marco
+é uma aplicação — *keyword spotting* — construída para precisar dos dois de
+fato, simultaneamente.
+
+## 2. Linha do tempo
+
+| Data (2026) | Commit(s) | Marco |
+|---|---|---|
+| 08-03 | `11b5490`…`aabce10` | Infraestrutura base: runtime bare-metal, alvos GVSoC por núcleo, pipeline ONNX→ciclos |
+| 08-04–05 | `f2cad44`, `a4516b6` | Memória modelada nos três núcleos; extensões Xssr/Xfrep no Snitch |
+| 08-05 | `4265ee1` | **Primeira tabela comparativa por núcleo** |
+| 08-05 | `d4aca65` | Plano de arquitetura para a malha heterogênea completa (2.5D/3D) |
+| 08-18 | `5963ac8` | Kernels RVV escritos à mão para o Spatz — **tabela vira a favor do Spatz** |
+| 08-26 | `c59b127`, `f8350fd`, `8d51ab9` | Placa `hetero_soc` (host + 2 clusters em um único chip), runtime de dispatch, plataforma Deeploy que mapeia cada nó ao núcleo certo |
+| 08-27 | `fa45f2c`, `2acdec4` | GEMM real em RVV + 8 núcleos de cômputo por cluster; kernels RVV viram padrão do pipeline — **tabela final de operador único** |
+| 08-29 | `1efa098` | **CNN de MNIST classificada na malha completa**, ponta a ponta |
+| 09-01 | `030c7c3` | **Keyword spotting com os dois clusters simultâneos**: `hes_post`/`hes_wait`, front-end MFCC — 1,82× sobre o mesmo trabalho serial, e o Snitch sai de 0% para 50% da carga |
+
+As seções seguintes detalham cada marco com sua tabela de desempenho.
+
+## 3. Infraestrutura base (03–05/08)
+
+Antes de qualquer comparação fazer sentido, foi preciso: o runtime bare-metal
+(crt0, semihosting, scripts de linker) para cada tipo de núcleo; os alvos
+GVSoC (`cva6_real`, `snitch_real`, `spatz_real`, e as variantes `_ideal` de
+memória de latência zero); o pipeline que leva um operador ONNX até um número
+de ciclos por núcleo; e a correção do modelo vetorial do Spatz no GVSoC
+(instruções faltantes, uma corrida de *writeback*, uma configuração de vetor
+obsoleta lida em execução adiada — ver `README.md`, seção *GVSoC model
+fixes*). Nesta fase o sistema de memória ainda não estava modelado (todo
+acesso era de um ciclo) e o Snitch ainda não usava suas extensões — por isso
+ainda não há uma tabela comparativa significativa.
+
+Em seguida, o sistema de memória passou a ser simulado nos três núcleos (cache
+misses, latência de DRAM e banda de *refill* entram na contagem de ciclos), e
+o Snitch ganhou seus kernels de ponto flutuante escritos contra Xssr/Xfrep.
+
+## 4. Primeira tabela comparativa (commit `4265ee1`, 05/08)
+
+Um núcleo de cada tipo, memória modelada, Spatz ainda rodando código
+autovetorizado pelo compilador (`-O3 -ffast-math`), sem kernel próprio.
+
+| operador | shape | cva6 | snitch | spatz |
+|---|---|---|---|---|
+| Add | 64 × fp32, elementwise | **863** | 1053 (0.8×) | 1035 (0.8×) |
+| MatMul | 2 × (16×32 · 32×8) fp32 | 119.0k | **12.6k (9.4×)** | 15.8k (7.5×) |
+| MatMul (custom op) | 32×32×32 fp32 | 477.5k | **43.1k (11.1×)** | 57.6k (8.3×) |
+| GEMM | 32×32×32 fp32 + bias | 489.0k | **43.5k (11.2×)** | 60.9k (8.0×) |
+| GEMM (int8) | 32×32×32, s8·s8 → s32 | 575.9k | 451.7k (1.3×) | **84.1k (6.8×)** |
+| Conv2D + bias | 2×64×32 fp32, 4 filtros 2×8×8, stride 2×4 | 1.86M | **173.9k (10.7×)** | 457.0k (4.1×) |
+| Softmax | 512 fp32, 32 linhas de 16 | 36.5k | 51.0k (0.7×) | **32.5k (1.1×)** |
+
+**Leitura:** um único núcleo Snitch vence toda operação de ponto flutuante,
+inclusive contra o Spatz de 4 lanes — Xssr remove as cargas e a aritmética de
+endereço, Xfrep remove o laço, e o que sobra é a taxa de FMA que a banda do
+*stream* permite. O Spatz só ganha em GEMM inteira, onde nem Xssr nem Xfrep
+ajudam (ambos operam sobre o *register file* de ponto flutuante) e a
+vetorização RVV se aplica diretamente.
+
+## 5. Plano da malha heterogênea completa (commit `d4aca65`, 05/08)
+
+Com o comparativo de núcleo único em mãos, `docs/hetero-mesh-plan.md` traçou o
+caminho até um chip único com CVA6 + Snitch/Spatz em memória 2.5D/3D — a
+motivação por trás de tudo que vem depois. O documento já registrava as
+simplificações deliberadas (2 clusters em vez de 8, clusters homogêneos, D2D
+só por DMA) e os riscos assumidos, com destaque para um: *"Phase 2 é o
+concentrado de risco — se o dispatch entre clusters não funcionar, as fases
+3–5 não têm em que se apoiar."* Esse risco foi endereçado diretamente nas
+etapas de 26/08 (seção 7).
+
+## 6. Kernels RVV do Spatz (commit `5963ac8`, 18/08)
+
+Antes desta etapa veio o empacotamento em Docker (`dad3f35`), para rodar o
+simulador em qualquer máquina. Em seguida, o Spatz recebeu kernels de
+MatMul/GEMM escritos à mão em RVV (via a flag `--spatz-kernels rvv`), em vez
+de depender do autovetorizador do GCC.
+
+### 6.1 O sintoma que não fechava
+
+A tabela da seção 4 dizia que um Snitch *escalar* vencia um Spatz de 4 lanes em
+toda a família matmul — GEMM por 1,4×, MatMul por 1,3×, e Conv2D por 2,6×.
+Essa conclusão não fecha
+com o hardware: quatro lanes de FMA não perdem para uma FPU escalar num laço
+denso de multiplicação-acumulação, por mais bem alimentada que ela esteja. Ou a
+descrição do hardware estava errada, ou o Spatz não estava rodando o código que
+deveria. A segunda hipótese é a testável.
+
+### 6.2 Uma chave que isola a variável
+
+Em vez de comparar dois programas diferentes, o pipeline ganhou a flag
+`--spatz-kernels {tuned,autovec}`, que troca *apenas* os kernels do Spatz —
+mesmo grafo ONNX, mesmo runtime, mesma placa, mesmo modelo de memória, mesma
+contagem de núcleos. Com uma variável só, "o código gerado é a causa" deixa de
+ser opinião e vira medição repetível. A flag continua no pipeline exatamente
+para que a comparação possa ser refeita a qualquer momento.
+
+### 6.3 A prova: o que o compilador de fato emitiu
+
+Desassemblar os dois binários responde à pergunta diretamente. Instruções
+vetoriais dentro do kernel GEMM, mesmo fonte, mesmas flags de arquitetura
+(`riscv-none-elf-objdump -d`):
+
+| instrução | o que faz | autovetorizado | escrito à mão |
+|---|---|---|---|
+| `vlse32.v` | carga com passo — desce uma coluna de B | **2** | 0 |
+| `vluxei32.v` | *gather* indexado | **1** | 0 |
+| `vfredusum.vs` | redução horizontal, uma por elemento de saída | **3** | 0 |
+| `vfmv.f.s` | extrai o escalar reduzido | **3** | 0 |
+| `vle32.v` | carga unitária | 3 | **7** |
+| `vfmacc.vf` | FMA com escalar transmitido | 0 | **5** |
+
+Não é que o GCC tenha falhado em vetorizar — ele vetorizou. Vetorizou o **laço
+interno**, que num matmul é o produto escalar, e essa é a escolha errada para
+esta máquina duas vezes: obriga a ler B descendo uma coluna, e obriga uma
+redução horizontal por resultado.
+
+### 6.4 Por que essas instruções custam caro *neste* chip
+
+A TCDM do cluster tem 4 superbancos × 8 bancos de 8 B = **32 bancos**, com
+período de intercalação de 256 B. Uma coluna de B tem passo `O×4` bytes, e o
+número de bancos distintos que a carga alcança é `32 / mdc(32, passo/8)`:
+
+| largura da linha O | passo | bancos alcançados | |
+|---|---|---|---|
+| 8 | 32 B | 8 de 32 | — |
+| 16 | 64 B | 4 de 32 | — |
+| 32 (o benchmark) | 128 B | **2 de 32** | 16× de paralelismo perdido |
+| 64 | 256 B | **1 de 32** | serializa por completo |
+| 128 | 512 B | **1 de 32** | serializa por completo |
+
+Ou seja: para *toda* largura de linha que seja potência de dois — que é o caso
+de praticamente toda camada de rede neural — a carga com passo colapsa sobre um
+ou dois bancos, e uma operação que deveria ocupar 32 bancos em paralelo vira uma
+fila. A `vfredusum.vs` agrava por outro caminho: é a única operação vetorial
+cujo custo **não se amortiza no comprimento do vetor**, porque produz um escalar
+por vez — e o laço a executa uma vez por elemento de saída.
+
+### 6.5 A confirmação
+
+A correção é trocar a forma, não o compilador: manter o acumulador num
+registrador vetorial ao longo de todo o laço `k`, transmitir o elemento de A com
+`vfmacc.vf` e ler B em passo unitário. As três instruções caras desaparecem do
+desassemblado, e a medição fecha o argumento — mesma placa, só os kernels
+trocados:
+
+| memória | autovetorizado | escrito à mão | |
+|---|---|---|---|
+| ideal (latência zero) | 59.804 | **6.356** | 9,4× |
+| modelada | 60.900 | **8.400** | 7,3× |
+
+A diferença entre as duas linhas é ela própria informativa: o número
+autovetorizado quase não muda entre memória ideal e modelada (59,8k → 60,9k),
+porque já estava dominado por conflito de bancos dentro da TCDM, não por acesso
+à DRAM. O kernel escrito à mão, por ser muito menor, sente o custo fixo do
+sistema de memória proporcionalmente muito mais — e é por isso que a razão cai
+de 9,4× para 7,3×.
+
+### 6.6 E a tabela vira
+
+| operador | shape | cva6 | snitch | spatz |
+|---|---|---|---|---|
+| Add | 64 × fp32, elementwise | **863** | 1053 (0.8×) | 1035 (0.8×) |
+| MatMul | 2 × (16×32 · 32×8) fp32 | 119.0k | 12.6k (9.4×) | **6.8k (17.5×)** |
+| MatMul (custom op) | 32×32×32 fp32 | 477.5k | 43.1k (11.1×) | **7.5k (63.3×)** |
+| GEMM | 32×32×32 fp32 + bias | 489.0k | 43.5k (11.2×) | **8.4k (58.5×)** |
+| GEMM (int8) | 32×32×32, s8·s8 → s32 | 575.9k | 451.7k (1.3×) | **84.1k (6.8×)** |
+| Conv2D + bias | 2×64×32 fp32, 4 filtros 2×8×8, stride 2×4 | 1.86M | **173.9k (10.7×)** | 457.0k (4.1×) |
+| Softmax | 512 fp32, 32 linhas de 16 | 36.5k | 51.0k (0.7×) | **32.5k (1.1×)** |
+
+**Leitura:** a tabela vira — Spatz passa a vencer toda operação da família
+matmul, por 17–63× sobre CVA6 e 2–6× sobre Snitch. A conclusão da etapa
+anterior ("Snitch vence tudo em fp32") não era uma verdade de hardware; era um
+artefato de o Spatz ainda rodar código de compilador. Conv2D continua com
+Snitch, simplesmente porque o Spatz ainda não tinha um kernel próprio para
+essa operação — a lacuna mais óbvia a fechar em seguida.
+
+### 6.7 Uma segunda descoberta, que não se deve confundir com a primeira
+
+"O GCC gerou código lento" e "o modelo do Spatz no GVSoC executava esse código
+*errado*" são achados diferentes, e o segundo veio junto por um motivo simples:
+código autovetorizado exercita o modelo muito mais do que os benchmarks
+escritos à mão que o próprio GVSoC acompanha, e alcança cantos da ISA que
+ninguém tinha pisado.
+
+O método para isolar esses casos foi sempre o mesmo, e é o oposto de depurar
+dentro do kernel: extrair a sequência exata que o GCC emitiu para um **probe
+mínimo em assembly**, com entradas conhecidas e os intermediários impressos
+(`runtime/tests/vec_probe.c`, `runtime/tests/smoke_convred.c`). Isso separa as
+duas perguntas que um resultado errado confunde — "o compilador emitiu a coisa
+errada" contra "o modelo executa a coisa certa de forma errada" — porque o probe
+é curto o bastante para se conferir a semântica à mão contra a especificação
+RVV.
+
+Quatro correções saíram daí, hoje em
+`deps/patches/gvsoc-core-rvv-extensions-and-fixes.patch`: instruções ausentes
+(`vsext`/`vzext`, `vwadd.w`, `vmv<nr>r.v`, e `vl<nr>r.v`/`vs<nr>r.v`, que eram
+`abort()`); `vtype` obsoleto em execução adiada, com o handler lendo a
+configuração que um `vsetvli` posterior já havia trocado; uma corrida de
+*writeback* em `vmv.x.s`, cujo destino inteiro não era escalonado; e rajadas da
+VLSU cruzando fronteira de banco na TCDM.
+
+A quarta é a mais instrutiva do conjunto: não deixava a simulação lenta nem a
+fazia falhar — **corrompia dados silenciosamente**, e apareceu como uma Conv2D
+que dava o número errado. É o tipo de defeito que só se encontra porque cada
+operador é conferido contra o onnxruntime, e não apenas cronometrado.
+
+## 7. A SoC heterogênea completa (26–27/08)
+
+Três commits no mesmo dia (`c59b127`, `f8350fd`, `8d51ab9`) transformaram três
+placas medidas separadamente em um único chip:
+
+1. **`c59b127`** — a placa `hetero_soc` compõe, num só espaço de endereços e
+   numa só simulação: um orquestrador CVA6, um cluster Snitch de 9 núcleos
+   (Xssr/Xfrep) e um par Snitch/Spatz de 2 núcleos. Nenhuma placa GVSoC de
+   catálogo junta CVA6 e clusters Snitch; `targets/hetero/soc.py` monta isso a
+   partir das peças existentes.
+2. **`f8350fd`** — runtime de *dispatch*: o host entrega um kernel a qualquer
+   um dos dois clusters e lê o resultado de volta (12/12 corretos em MatMul,
+   GEMM e Conv2D). O custo em ocioso é zero — os núcleos de cômputo ficam
+   parados numa barreira de hardware do modelo, e o núcleo de controle dorme
+   em `wfi` até o host escrever no registrador do cluster.
+3. **`8d51ab9`** — a plataforma Deeploy hetero: o grafo ONNX inteiro é
+   compilado de uma vez, e um modelo de custo escolhe, nó a nó, em qual dos
+   três motores (`cva6`, `snitch`, `spatz`) ele roda.
+
+Nesse ponto, o kernel RVV do Spatz ainda era o de núcleo único da seção 6, e o
+cluster Spatz ainda tinha só 1 núcleo de cômputo contra os 8 do cluster
+Snitch — uma desvantagem de contagem de núcleos alheia ao hardware. A
+plataforma recém-criada foi verificada contra as três opções de fixação
+(`--pin`) em GEMM/Regular:
+
+| estratégia | ciclos | vs. mapeamento automático |
+|---|---|---|
+| mapeado automaticamente | **11.647** (→ snitch) | — |
+| `--pin snitch` | 11.647 | igual |
+| `--pin spatz` | 64.501 | 5,5× mais lento |
+| `--pin cva6` | 488.728 | 42× mais lento |
+
+`fa45f2c` corrigiu as duas causas dessa desvantagem no mesmo commit: um
+kernel RVV real para MatMul/GEMM que vetoriza as *colunas de saída* em vez do
+eixo de redução (B lido em passo unitário, A transmitido por
+`vfmacc.vf`, acumulador vetorial vivendo o laço `k` inteiro, sem redução
+horizontal), e 8 núcleos de cômputo no cluster Spatz — igualando a contagem
+do cluster Snitch. Com os dois clusters em pé de igualdade (`make mesh-test`,
+ainda 12/12 corretos):
+
+| kernel | snitch (8 núcleos) | spatz (8 núcleos) | vencedor |
+|---|---|---|---|
+| MatMul 32×32×32 | 8.048 | 1.952 | spatz, 4,1× |
+| GEMM 32×32×32 | 7.258 | 2.752 | spatz, 2,6× |
+| Conv2D | 96.568 | 86.285 | spatz, 1,1× (ainda autovetorizado no Spatz) |
+
+E o mapeamento automático em GEMM/Regular se inverteu:
+
+| estratégia | ciclos | vs. mapeamento automático |
+|---|---|---|
+| mapeado automaticamente | **7.885** (→ spatz) | — |
+| `--pin spatz` | 7.885 | igual |
+| `--pin snitch` | 11.647 | 1,5× mais lento |
+| `--pin cva6` | 488.728 | 62× mais lento |
+
+`2acdec4` fechou a etapa tornando os kernels RVV o padrão do pipeline de
+núcleo único (não mais uma flag opcional), com a tabela final da família de
+operadores isolados:
+
+| operador | shape | cva6 | snitch | spatz |
+|---|---|---|---|---|
+| Add | 64 × fp32, elementwise | **863** | 1053 (0.8×) | 1035 (0.8×) |
+| MatMul | 2 × (16×32 · 32×8) fp32 | 119.0k | 12.6k (9.4×) | **7.0k (16.9×)** |
+| MatMul (custom op) | 32×32×32 fp32 | 477.5k | 43.1k (11.1×) | **11.2k (42.6×)** |
+| GEMM | 32×32×32 fp32 + bias | 489.0k | 43.5k (11.2×) | **13.5k (36.3×)** |
+| GEMM (int8) | 32×32×32, s8·s8 → s32 | 575.9k | 451.7k (1.3×) | **84.1k (6.8×)** |
+| Conv2D + bias | 2×64×32 fp32, 4 filtros 2×8×8, stride 2×4 | 1.86M | **173.9k (10.7×)** | 457.0k (4.1×) |
+| Softmax | 512 fp32, 32 linhas de 16 | 36.5k | 51.0k (0.7×) | **32.5k (1.1×)** |
+
+**Leitura:** a linha divisória entre os dois núcleos acelerados não é
+ponto-flutuante versus inteiro — é se o trabalho se reduz a um laço denso de
+multiplicação-acumulação que o sequenciador do Snitch consegue reproduzir. Se
+sim, Snitch é competitivo; se não (uma redução inteira, uma chamada de libm),
+o Spatz é o cluster melhor, qualquer que seja o tipo de dado. Conv2D
+permanece com o Snitch por lacuna de software (falta um kernel RVV
+escrito à mão para o Spatz), não por limite de hardware.
+
+## 8. MNIST na malha completa (commit `1efa098`, 29/08)
+
+`pipeline/mnist.py` treina uma CNN pequena em MNIST usando apenas numpy (sem
+nova dependência), exporta para ONNX e a empacota como operador do pipeline. A
+rede:
+
+```
+28×28×1 → Conv 3×3,8 → 26×26×8 → ReLU → MaxPool 2 → 13×13×8
+        → Conv 3×3,16 → 11×11×16 → ReLU → MaxPool 2 → 5×5×16
+        → Flatten → 400 → Gemm → 32 → ReLU → Gemm → 10 → Softmax
+```
+
+Duas verificações independentes: a passada numpy bate com o onnxruntime sobre
+o grafo exportado (diferença máxima de 2,0×10⁻⁷), e a acurácia relatada
+confirma que o treino funcionou — **97,61% sobre as 10.000 imagens de
+teste**, 4 épocas. `runtime/mesh/mnist_main.c` roda cada imagem embutida na
+malha completa e checa a predição contra o rótulo verdadeiro *e* contra o
+onnxruntime sobre o mesmo grafo — a segunda é a que pode falhar a simulação:
+um dígito errado só diz que a rede vale pouco; uma discordância do
+onnxruntime diria que o chip simulado computou algo diferente da referência.
+
+Execução completa (64 imagens): **100% de acordo com o onnxruntime**, 100% de
+acerto nas 64 imagens, **570.029 ciclos por imagem**.
+
+Comparação de posicionamento (8 imagens, mesma metodologia `--pin` das seções
+anteriores, agora sobre a rede inteira):
+
+| estratégia | ciclos/imagem | vs. mapeamento automático |
+|---|---|---|
+| mapeado automaticamente | **575.872** | — |
+| `--pin spatz` | 575.872 | igual — o mapeador já escolhe Spatz onde pode |
+| `--pin snitch` | 621.111 | 1,08× mais lento |
+| `--pin cva6` | 4.215.076 | 7,3× mais lento |
+
+O log da execução automática confirma nó a nó o que a seção 7 já indicava:
+`Conv` e `Gemm` (as operações densas) vão para `spatz`; `Relu`, `MaxPool`,
+`Reshape` e `Softmax` ficam no `cva6`, coerente com nenhum dos clusters ter
+kernel para elas. Ciclos por engine, na execução de 8 imagens: **spatz
+2.418.667**, **cva6 2.140.367** — as duas cargas ficam próximas porque o
+CVA6 absorve todo o trabalho de controle e as operações *softmax*/ativação,
+não porque seja competitivo nas mesmas operações densas do Spatz.
+
+Este marco fecha o objetivo original do projeto: uma rede neural real,
+treinada e verificada contra uma referência externa, classificando dados
+reais rodando ponta a ponta sobre a arquitetura heterogênea simulada — com o
+compilador escolhendo automaticamente, por nó do grafo, o núcleo certo para
+cada operação.
+
+Fecha também deixando duas coisas à vista na própria tabela, e é delas que a
+seção 9 trata: o cluster **Snitch executa zero ciclos**, e os motores nunca
+rodam ao mesmo tempo — 2.418.667 + 2.140.367 é uma soma, não um máximo.
+
+## 9. Os dois clusters ao mesmo tempo: keyword spotting (commit `030c7c3`, 01/09)
+
+As duas lacunas que a seção 8 deixa têm cada uma sua causa, e nenhuma delas é
+acidental. O Snitch fica com zero ciclos porque o modelo de custo manda —
+corretamente — todo nó denso para o Spatz: nada naquela rede tem o formato que
+os sequenciadores Xssr/Xfrep sabem explorar. E os clusters se revezam porque
+`hes_offload()` é bloqueante: o host escreve o mailbox, toca a campainha e fica
+no *poll* até a resposta chegar, sem nada a fazer no meio-tempo. O que a seção 8
+mede, portanto, é escolha de operador — não computação heterogênea.
+
+`ops/kws` é uma aplicação construída para precisar dos dois. É *keyword
+spotting* sobre fala sintética, e tem dois estágios que querem hardware
+diferente e estão disponíveis ao mesmo tempo:
+
+```
+ clipe N+1 ─┐
+            ▼
+  [cluster SNITCH]  janela → FFT → |·|² → mel → log → DCT     um job, 8 núcleos,
+            │       (HES_K_MFCC_FP32)                         fatiado por quadro
+            ▼  atributos 32×13   (memória principal, buffer duplo)
+  [cluster SPATZ]   Conv 3×3 → Conv 3×3 → Gemm → Gemm         gerado pelo Deeploy,
+            │                                                 kernels existentes
+            ▼  logits
+  [CVA6]            ReLU / MaxPool / Softmax / argmax / controle
+```
+
+Como os clipes chegam continuamente, o *front-end* do clipe N+1 é independente
+do classificador do clipe N. `runtime/mesh/kws_main.c` posta um antes de rodar o
+outro e o recolhe depois. `RunNetwork()` despacha seus nós Conv e Gemm para o
+mailbox de *outro* cluster, então a sobreposição não exigiu nada do código
+gerado — apenas dividir `hes_offload()` em `hes_post()` + `hes_wait()`. Cada
+cluster já tinha seu próprio par `seq`/`done_seq`: um job por cluster em voo
+sempre foi expressável, `hes_offload()` é que nunca usou isso.
+
+### 9.1 O que a sobreposição vale
+
+16 clipes, memória modelada, `make kws`:
+
+| estratégia | ciclos/clipe | vs. pipelined |
+|---|---|---|
+| front-end no snitch, classificador no spatz | **256.660** | — |
+| o mesmo trabalho, serial (`SERIAL=1`) | 468.232 | 1,82× mais lento |
+| front-end no spatz, classificador no snitch (`FE=spatz PIN=snitch`) | 269.434 | 1,05× mais lento |
+| classificador no host (`PIN=cva6`, 8 clipes) | 1.539.740 | 6,0× mais lento |
+
+E, pela primeira vez neste repositório, os três motores fazem trabalho real:
+
+| motor | ciclos (16 clipes) | fração | |
+|---|---|---|---|
+| snitch | 3.615.963 | 50,2% | o front-end MFCC |
+| spatz | 1.831.164 | 25,4% | Conv e Gemm |
+| cva6 | 1.755.332 | 24,4% | ReLU, MaxPool, Softmax, controle |
+
+contra o `spatz 53% / cva6 47% / snitch 0%` do MNIST. **93,4% dos ciclos do
+front-end se sobrepõem ao classificador** e não custam tempo de parede algum.
+
+### 9.2 O que a comparação de posicionamento diz
+
+As duas linhas do meio da primeira tabela são o mesmo trabalho com os estágios
+trocados entre os clusters, e o interessante é que o Spatz é mais rápido nos
+**dois** estágios e ainda assim perde:
+
+| estágio | no snitch | no spatz | |
+|---|---|---|---|
+| front-end MFCC | 226,0k/clipe | **185,7k/clipe** | spatz, 1,22× |
+| classificador (parte do cluster) | 129,8k/clipe | **114,4k/clipe** | spatz, 1,13× |
+
+Os dois estágios *precisam* estar em clusters diferentes: o mailbox de um
+cluster guarda um único descritor, então postar o próximo front-end no cluster
+que o classificador está usando sobrescreveria um job em voo — o que `hes_post()`
+recusa e `pipeline/run_hetero.py` detecta antes da compilação. A escolha,
+portanto, é qual estágio recebe o Spatz. E o período de um *pipeline* é o
+**máximo** dos seus estágios, não a soma: sob qualquer das duas atribuições o
+classificador é o estágio mais lento, então o Spatz pertence ao classificador e
+o front-end fica com o Snitch por eliminação.
+
+A regra não é "cada estágio no núcleo que o roda mais rápido"; é **"o núcleo
+melhor para o estágio que determina o período"**. Essa é a conclusão que a
+seção 8 não tinha como produzir, porque nada lá rodava em paralelo.
+
+### 9.3 O que o kernel SSR do front-end compra — e o que não compra
+
+`runtime/snitch/kernels/mfcc_fp32_ssr.c` transmite dois dos quatro estágios, os
+dois em que o argumento de padrão de acesso se apoia: o **banco de filtros mel**
+(40 reduções, cada uma sobre sua própria faixa irregular de 10–30 bins — vetores
+curtos *e* uma redução horizontal por filtro, o pior caso do RVV) e a **DCT-II**.
+
+Vale 8,2% do front-end (992,5k → 911,6k ciclos em 4 clipes), e nada além disso,
+porque a **FFT domina e não é transmitida**: sua borboleta quer quatro leituras
+e quatro escritas por iteração contra três *data movers*, então transmiti-la
+significa quebrá-la em passagens por um buffer intermediário, e se isso custa
+menos do que as cargas que remove é uma pergunta real, não retórica. Fica em
+aberto.
+
+É também por isso que o Spatz vence o front-end na tabela acima: **a medição não
+sustenta a hipótese a priori** de que o front-end seria trabalho de formato
+Snitch. Isso é registrado como refutado, e não silenciosamente abandonado — na
+mesma disciplina da seção 6, onde a conclusão "Snitch vence tudo em fp32" também
+não sobreviveu à medição seguinte.
+
+### 9.4 Como é verificado
+
+Três checagens independentes, e errar a palavra-chave não é nenhuma delas:
+
+- a predição de cada clipe contra o **onnxruntime** sobre o mesmo grafo — 16/16,
+  a mesma disciplina de `mnist_main.c`;
+- os **atributos** de cada clipe contra o front-end numpy de `pipeline/kws.py`,
+  embutidos em `ops/kws/kws_data.h`. Máx |chip − numpy| = 5×10⁻⁶. Sem isso, uma
+  FFT errada só apareceria como uma classificação errada;
+- `make ssr-test` roda `runtime/tests/ssr_mfcc.c`, que compara o banco de
+  filtros e a DCT transmitidos contra uma referência escalar nas larguras de
+  filtro irregulares e contagens de cepstra que a aplicação nunca alcança —
+  idêntico bit a bit nos cinco casos.
+
+O áudio é sintetizado proceduralmente a partir de moldes de formantes (sem
+download, sem dependência nova), então os 98,8% de acurácia de teste dizem que a
+rede treinou, não que o modelo compete com a literatura de Speech Commands. O
+que está sendo medido é o chip.
+
+## 10. Resultado final consolidado
+
+A tabela abaixo resume a evolução completa em três escalas: operador isolado
+(núcleo único, seção 7), rede completa (malha inteira, seção 8) e aplicação
+com os dois clusters simultâneos (seção 9).
+
+| | escala | quem faz o trabalho denso | ganho | contra o quê |
+|---|---|---|---|---|
+| Operador isolado (`2acdec4`) | 1 núcleo por tipo | Spatz (matmul/GEMM), Snitch (Conv2D) | 17–63× | CVA6 |
+| MNIST na SoC completa (`1efa098`) | 8+8 núcleos de cômputo por cluster, rede inteira | Spatz (Conv, Gemm); CVA6 (Relu/Pool/Reshape/Softmax) | 7,3× | a mesma rede fixada no CVA6 |
+| KWS nos dois clusters (`030c7c3`) | dois estágios simultâneos, 8+8 núcleos | Snitch (front-end MFCC), Spatz (Conv/Gemm), CVA6 (ativações) | 1,82× | o mesmo trabalho, serial |
+
+Repare que as três linhas não medem a mesma coisa, e é justamente aí que está o
+argumento do projeto. As duas primeiras comparam **um núcleo contra outro** na
+mesma tarefa: são medidas de especialização, e a melhor resposta é sempre
+"mande para o núcleo mais rápido". A terceira compara **a mesma máquina contra
+ela mesma**, com e sem sobreposição: é uma medida de *concorrência*, e nela a
+resposta se inverte — o Spatz é mais rápido nos dois estágios do KWS e, ainda
+assim, o melhor posicionamento é aquele que o deixa no classificador e entrega
+o front-end ao Snitch (seção 9.2).
+
+E a distribuição da carga muda de figura junto com a métrica:
+
+| | snitch | spatz | cva6 |
+|---|---|---|---|
+| MNIST na malha (seção 8) | **0%** | 53% | 47% |
+| KWS nos dois clusters (seção 9) | **50,2%** | 25,4% | 24,4% |
+
+A trajetória em quatro frases: **Snitch domina** enquanto o Spatz roda código
+de compilador (seção 4); **Spatz domina** assim que ganha um kernel RVV
+escrito à mão (seções 6–7); na malha completa rodando uma CNN real, o
+**mapeamento automático do Deeploy reproduz exatamente** essa mesma decisão por
+operação, sem que fosse necessário fixar nada à mão (seção 8); e, quando a
+aplicação finalmente tem dois estágios independentes para oferecer, o critério
+deixa de ser "qual núcleo é mais rápido nesta operação" e passa a ser **"qual
+estágio determina o período do pipeline"** (seção 9).
+
+Vale registrar o que *não* se confirmou. O KWS foi desenhado sobre a hipótese
+de que um front-end MFCC seria trabalho de formato Snitch — borboletas de FFT
+com passo variável e reduções curtas e irregulares, o pior caso do RVV. A
+medição diz o contrário: o Spatz é 1,22× mais rápido no front-end. A hipótese
+está registrada como refutada (seção 9.3), pelo mesmo critério que já havia
+derrubado o "Snitch vence tudo em fp32" da seção 4 — neste projeto uma
+conclusão vale enquanto a próxima medição não a contradiz.
+
+## 11. Limitações e trabalhos futuros
+
+- **Conv2D no Spatz ainda é autovetorizado**, não um kernel RVV escrito à
+  mão — é a lacuna mais clara deixada em aberto pela seção 7; o ganho de
+  1,1× sobre o Snitch em 8 núcleos vem só da contagem de núcleos, não de um
+  kernel melhor.
+- **Kernel int8 genérico em ambos os clusters** — nem Snitch nem Spatz têm
+  kernel escrito à mão para GEMM inteira; 84,1k ciclos (seção 4) não é um
+  teto.
+- **Redes inteiras rodam só em fp32** — a plataforma Deeploy hetero recusa
+  qualquer rede que não seja fp32 nos clusters, porque o tipo de dado não é
+  lido diretamente dos dtypes do ONNX (`8d51ab9`); redes inteiras hoje rodam
+  inteiramente no host.
+- **Escala de clusters** — o plano original (`docs/hetero-mesh-plan.md`)
+  previa avaliar 8 clusters de 8 núcleos; o projeto ficou em 2 clusters de 8
+  núcleos de cômputo cada, por custo de tempo de simulação (73 instâncias de
+  ISS versus as atuais ~18). Fica como pergunta em aberto do plano original:
+  publicar os resultados finais em 2×8 ou justificar a extrapolação para
+  8×8.
+- **D2D e HyperRAM (memória 2.5D/3D)** do plano original não foram
+  implementados — o projeto convergiu para DRAM única antes de chegar a essa
+  fase.
+- **A FFT do front-end KWS não é transmitida por SSR** (seção 9.3). É a lacuna
+  mais clara deixada pela seção 9, e a razão pela qual o Spatz vence um estágio
+  que o argumento de padrão de acesso previa para o Snitch.
+- **Não existe kernel RVV escrito à mão para o front-end no Spatz**, assim como
+  não existe para Conv2D: os 185,7k ciclos/clipe do Spatz são código
+  autovetorizado, não um teto.
+- **Não há caminho cluster a cluster**: os atributos vão do Snitch para a
+  memória principal e de lá para o Spatz. É um ida-e-volta de DMA real, contado
+  honestamente nos números acima, e é também por que o front-end é um único job
+  em vez de três.
+- **Um job por cluster em voo.** O mailbox guarda um descritor, o que basta para
+  o pipeline de dois estágios desta seção mas impede, por exemplo, dois clipes
+  em voo no mesmo cluster.

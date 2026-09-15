@@ -9,7 +9,7 @@ MEM ?= real
 DBG := $(if $(DEBUG),--debug)
 TARGETS := cva6 snitch spatz cva6_real snitch_real spatz_real hetero_soc ara_v2 ara_host hetero_ara
 
-.PHONY: run gvsoc smoke ssr-test mesh-probe mesh-test hetero mnist clean
+.PHONY: run gvsoc smoke ssr-test mesh-probe mesh-test hetero mnist kws clean
 
 # Snitch bare-metal test build (the pipeline's snitch flags, minus the
 # generated network) used by the ssr-test target below.
@@ -37,15 +37,21 @@ smoke:
 	$(PY) pipeline/run.py Tests/Kernels/FP32/GEMM/Regular --memory $(MEM) --timeout 300 $(DBG)
 
 # Snitch Xssr/Xfrep checks: that the model streams and repeats at all
-# (ssr_probe), and that the kernels are right on the shapes the benchmark ops
-# do not reach — leftover columns, transposes, leftover filters (ssr_kernels).
+# (ssr_probe), that the GEMM/Conv kernels are right on the shapes the benchmark
+# ops do not reach -- leftover columns, transposes, leftover filters
+# (ssr_kernels) -- and that the KWS front-end's streamed filterbank and DCT are
+# right on the ragged filter widths and cepstra counts the application never
+# reaches (ssr_mfcc).
 ssr-test:
 	@mkdir -p work/ssr-test
 	$(SNITCH_CC) $(SNITCH_CFLAGS) $(SNITCH_GLUE) runtime/tests/ssr_probe.c \
 	  $(SNITCH_LIBS) -o work/ssr-test/ssr_probe.elf
 	$(SNITCH_CC) $(SNITCH_CFLAGS) $(SNITCH_GLUE) runtime/tests/ssr_kernels.c \
-	  runtime/snitch/kernels/*.c $(SNITCH_LIBS) -o work/ssr-test/ssr_kernels.elf
-	@for t in ssr_probe ssr_kernels; do \
+	  runtime/snitch/kernels/gemm_fp32_ssr.c runtime/snitch/kernels/conv2d_fp32_ssr.c \
+	  $(SNITCH_LIBS) -o work/ssr-test/ssr_kernels.elf
+	$(SNITCH_CC) $(SNITCH_CFLAGS) $(SNITCH_GLUE) runtime/tests/ssr_mfcc.c \
+	  runtime/snitch/kernels/mfcc_fp32_ssr.c $(SNITCH_LIBS) -o work/ssr-test/ssr_mfcc.elf
+	@for t in ssr_probe ssr_kernels ssr_mfcc; do \
 	  (cd work/ssr-test && PATH="$(ROOT)/.venv/bin:$$PATH" $(ROOT)/$(GVSOC) \
 	    --target-dir=$(ROOT)/targets --target=snitch_real --binary=$$t.elf run \
 	    2>/dev/null | grep -v '^WARNING'); \
@@ -92,6 +98,21 @@ IMAGES ?= 64
 mnist:
 	$(PY) pipeline/mnist.py --images $(IMAGES) $(if $(REUSE),--reuse)
 	$(PY) pipeline/run_hetero.py ops/mnist $(if $(PIN),--pin $(PIN)) $(DBG)
+
+# Keyword spotting: the application that gives both clusters work at once.
+# The MFCC front-end runs on one cluster while the classifier runs on the
+# other, so unlike mnist this one is not a sum of engines but a max.
+#   make kws                       front-end on snitch, pipelined
+#   make kws SERIAL=1              the same work with the clusters taking turns
+#   make kws FE=spatz              the other placement
+#   make kws PIN=snitch            pin the classifier's nodes, as with mnist
+# REUSE=1 keeps the committed network.onnx and only rebuilds the clips.
+CLIPS ?= 16
+FE ?= snitch
+kws:
+	$(PY) pipeline/kws.py --clips $(CLIPS) $(if $(REUSE),--reuse)
+	$(PY) pipeline/run_hetero.py ops/kws --frontend $(FE) \
+	  $(if $(SERIAL),--serial) $(if $(PIN),--pin $(PIN)) $(DBG)
 
 clean:
 	rm -rf work/*

@@ -74,6 +74,9 @@ enum {
   /* The kernels on this cluster only reach cluster-local memory, and the
      operands could not be staged into it. */
   HES_ERR_NEEDS_STAGING = 1,
+  /* The kernel needs per-core working storage and the TCDM heap had no room
+     left for it. */
+  HES_ERR_NO_SCRATCH = 2,
 };
 
 /* Kernel ids. 0 is reserved so a zeroed mailbox never looks like a job. */
@@ -83,6 +86,7 @@ enum {
   HES_K_MATMUL_FP32 = 2,    /* MatMul_fp32_fp32_fp32                         */
   HES_K_GEMM_FP32 = 3,      /* Gemm_fp32_fp32_fp32_fp32                      */
   HES_K_CONV2D_FP32 = 4,    /* Conv2d_fp32_fp32_fp32_NCHW                    */
+  HES_K_MFCC_FP32 = 5,      /* Mfcc_fp32_fp32 -- the KWS front-end           */
 };
 
 #endif /* __ASSEMBLER__ */
