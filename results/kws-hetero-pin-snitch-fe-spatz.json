@@ -2,6 +2,7 @@
   "op": "kws",
   "mapping": {
     "pin": "snitch",
+    "host": "cva6",
     "nodes": [
       {
         "node": "conv1",
@@ -59,37 +60,36 @@
         "engine": "cva6"
       }
     ],
-    "host": "cva6",
     "frontend": "spatz",
     "serial": false
   },
   "result": {
     "status": "ok",
-    "wall_s": 11.2,
+    "wall_s": 11.7,
     "nodes": [
       {
         "node": 0,
         "op": "Conv",
         "engine": "snitch",
-        "cycles": 54589
+        "cycles": 54484
       },
       {
         "node": 1,
         "op": "Relu",
         "engine": "cva6",
-        "cycles": 48966
+        "cycles": 49064
       },
       {
         "node": 2,
         "op": "MaxPool",
         "engine": "cva6",
-        "cycles": 61222
+        "cycles": 61221
       },
       {
         "node": 3,
         "op": "Conv",
         "engine": "snitch",
-        "cycles": 75871
+        "cycles": 75872
       },
       {
         "node": 4,
@@ -131,7 +131,7 @@
         "node": 10,
         "op": "Softmax",
         "engine": "cva6",
-        "cycles": 2011
+        "cycles": 1902
       },
       {
         "node": 0,
@@ -197,7 +197,7 @@
         "node": 10,
         "op": "Softmax",
         "engine": "cva6",
-        "cycles": 813
+        "cycles": 924
       },
       {
         "node": 0,
@@ -263,7 +263,7 @@
         "node": 10,
         "op": "Softmax",
         "engine": "cva6",
-        "cycles": 886
+        "cycles": 775
       },
       {
         "node": 0,
@@ -1125,8 +1125,8 @@
       }
     ],
     "per_engine_cycles": {
-      "snitch": 2099390,
-      "cva6": 1755342
+      "snitch": 2099286,
+      "cva6": 1755330
     },
     "waits": [],
     "log_tail": [
@@ -1136,46 +1136,46 @@
       "[HES-PROG] sample=16/16 node=8 op=Relu engine_id=0 cycles=398",
       "[HES-PROG] sample=16/16 node=9 op=Gemm engine_id=1 cycles=1930",
       "[HES-PROG] sample=16/16 node=10 op=Softmax engine_id=0 cycles=841",
-      "[HES-KWS] clips=16 correct=16 agree_with_onnx=16 mfcc_maxdiff_e6=5 cycles_total=4310959 cycles_per_clip=269434 frontend_engine=2 frontend_busy=2970469 frontend_wait=197491 hidden=2772978 snitch_busy=2076394 spatz_busy=2970469 pipelined=1 offload_failures=0",
-      "[HES-MEM] cache=/soc/icache accesses=152974 reads=152974 writes=0 hits=152854 misses=120 latency_cycles=13637",
-      "[HES-MEM] cache=/soc/dcache accesses=237758 reads=153491 writes=84267 hits=229804 misses=7954 latency_cycles=314940",
-      "[HES-MEM] cache=/soc/l2 accesses=85469 reads=1202 writes=84267 hits=84476 misses=993 latency_cycles=1038245"
+      "[HES-KWS] clips=16 correct=16 agree_with_onnx=16 mfcc_maxdiff_e6=5 cycles_total=4310984 cycles_per_clip=269436 frontend_engine=2 frontend_busy=2969545 frontend_wait=197249 hidden=2772296 snitch_busy=2076394 spatz_busy=2969545 pipelined=1 offload_failures=0",
+      "[HES-MEM] cache=/soc/icache accesses=95003 reads=95003 writes=0 hits=94884 misses=119 latency_cycles=13633",
+      "[HES-MEM] cache=/soc/dcache accesses=237758 reads=153491 writes=84267 hits=229871 misses=7887 latency_cycles=315069",
+      "[HES-MEM] cache=/soc/l2 accesses=85464 reads=1197 writes=84267 hits=84473 misses=991 latency_cycles=1037773"
     ],
     "clips": 16,
     "correct": 16,
     "agree_with_onnx": 16,
     "mfcc_maxdiff": 5e-06,
-    "cycles": 4310959,
-    "cycles_per_clip": 269434,
+    "cycles": 4310984,
+    "cycles_per_clip": 269436,
     "accuracy": 1.0,
     "frontend_engine": "spatz",
-    "frontend_busy": 2970469,
-    "frontend_wait": 197491,
-    "hidden_cycles": 2772978,
+    "frontend_busy": 2969545,
+    "frontend_wait": 197249,
+    "hidden_cycles": 2772296,
     "cluster_busy": {
       "snitch": 2076394,
-      "spatz": 2970469
+      "spatz": 2969545
     },
     "pipelined": true,
     "offload_failures": 0,
     "caches": [
       {
         "cache": "icache",
-        "accesses": 152974,
-        "misses": 120,
-        "latency_cycles": 13637
+        "accesses": 95003,
+        "misses": 119,
+        "latency_cycles": 13633
       },
       {
         "cache": "dcache",
         "accesses": 237758,
-        "misses": 7954,
-        "latency_cycles": 314940
+        "misses": 7887,
+        "latency_cycles": 315069
       },
       {
         "cache": "l2",
-        "accesses": 85469,
-        "misses": 993,
-        "latency_cycles": 1038245
+        "accesses": 85464,
+        "misses": 991,
+        "latency_cycles": 1037773
       }
     ]
   }

@@ -2,6 +2,7 @@
   "op": "kws",
   "mapping": {
     "pin": null,
+    "host": "cva6",
     "nodes": [
       {
         "node": "conv1",
@@ -59,13 +60,12 @@
         "engine": "cva6"
       }
     ],
-    "host": "cva6",
     "frontend": "snitch",
     "serial": false
   },
   "result": {
     "status": "ok",
-    "wall_s": 25.3,
+    "wall_s": 26.8,
     "nodes": [
       {
         "node": 0,
@@ -131,7 +131,7 @@
         "node": 10,
         "op": "Softmax",
         "engine": "cva6",
-        "cycles": 1904
+        "cycles": 1902
       },
       {
         "node": 0,
@@ -1126,7 +1126,7 @@
     ],
     "per_engine_cycles": {
       "spatz": 1854351,
-      "cva6": 1755332
+      "cva6": 1755330
     },
     "waits": [],
     "log_tail": [
@@ -1136,24 +1136,24 @@
       "[HES-PROG] sample=16/16 node=8 op=Relu engine_id=0 cycles=398",
       "[HES-PROG] sample=16/16 node=9 op=Gemm engine_id=2 cycles=1183",
       "[HES-PROG] sample=16/16 node=10 op=Softmax engine_id=0 cycles=841",
-      "[HES-KWS] clips=16 correct=16 agree_with_onnx=16 mfcc_maxdiff_e6=5 cycles_total=4106566 cycles_per_clip=256660 frontend_engine=1 frontend_busy=3615963 frontend_wait=237899 hidden=3378064 snitch_busy=3615963 spatz_busy=1831164 pipelined=1 offload_failures=0",
-      "[HES-MEM] cache=/soc/icache accesses=95099 reads=95099 writes=0 hits=94980 misses=119 latency_cycles=13613",
+      "[HES-KWS] clips=16 correct=16 agree_with_onnx=16 mfcc_maxdiff_e6=5 cycles_total=4106443 cycles_per_clip=256652 frontend_engine=1 frontend_busy=3614890 frontend_wait=237899 hidden=3376991 snitch_busy=3614890 spatz_busy=1831164 pipelined=1 offload_failures=0",
+      "[HES-MEM] cache=/soc/icache accesses=95099 reads=95099 writes=0 hits=94980 misses=119 latency_cycles=13454",
       "[HES-MEM] cache=/soc/dcache accesses=237758 reads=153491 writes=84267 hits=229871 misses=7887 latency_cycles=315069",
-      "[HES-MEM] cache=/soc/l2 accesses=85464 reads=1197 writes=84267 hits=84473 misses=991 latency_cycles=1037753"
+      "[HES-MEM] cache=/soc/l2 accesses=85464 reads=1197 writes=84267 hits=84473 misses=991 latency_cycles=1037594"
     ],
     "clips": 16,
     "correct": 16,
     "agree_with_onnx": 16,
     "mfcc_maxdiff": 5e-06,
-    "cycles": 4106566,
-    "cycles_per_clip": 256660,
+    "cycles": 4106443,
+    "cycles_per_clip": 256652,
     "accuracy": 1.0,
     "frontend_engine": "snitch",
-    "frontend_busy": 3615963,
+    "frontend_busy": 3614890,
     "frontend_wait": 237899,
-    "hidden_cycles": 3378064,
+    "hidden_cycles": 3376991,
     "cluster_busy": {
-      "snitch": 3615963,
+      "snitch": 3614890,
       "spatz": 1831164
     },
     "pipelined": true,
@@ -1163,7 +1163,7 @@
         "cache": "icache",
         "accesses": 95099,
         "misses": 119,
-        "latency_cycles": 13613
+        "latency_cycles": 13454
       },
       {
         "cache": "dcache",
@@ -1175,7 +1175,7 @@
         "cache": "l2",
         "accesses": 85464,
         "misses": 991,
-        "latency_cycles": 1037753
+        "latency_cycles": 1037594
       }
     ]
   }

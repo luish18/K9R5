@@ -2,6 +2,7 @@
   "op": "kws",
   "mapping": {
     "pin": null,
+    "host": "cva6",
     "nodes": [
       {
         "node": "conv1",
@@ -59,55 +60,54 @@
         "engine": "cva6"
       }
     ],
-    "host": "cva6",
     "frontend": "snitch",
     "serial": true
   },
   "result": {
     "status": "ok",
-    "wall_s": 25.1,
+    "wall_s": 26.3,
     "nodes": [
       {
         "node": 0,
         "op": "Conv",
         "engine": "spatz",
-        "cycles": 50745
+        "cycles": 50521
       },
       {
         "node": 1,
         "op": "Relu",
         "engine": "cva6",
-        "cycles": 49064
+        "cycles": 48960
       },
       {
         "node": 2,
         "op": "MaxPool",
         "engine": "cva6",
-        "cycles": 61222
+        "cycles": 61221
       },
       {
         "node": 3,
         "op": "Conv",
         "engine": "spatz",
-        "cycles": 67813
+        "cycles": 67812
       },
       {
         "node": 4,
         "op": "Relu",
         "engine": "cva6",
-        "cycles": 7262
+        "cycles": 7374
       },
       {
         "node": 5,
         "op": "MaxPool",
         "engine": "cva6",
-        "cycles": 10778
+        "cycles": 10890
       },
       {
         "node": 6,
         "op": "Reshape",
         "engine": "cva6",
-        "cycles": 14
+        "cycles": 126
       },
       {
         "node": 7,
@@ -125,13 +125,13 @@
         "node": 9,
         "op": "Gemm",
         "engine": "spatz",
-        "cycles": 1295
+        "cycles": 1183
       },
       {
         "node": 10,
         "op": "Softmax",
         "engine": "cva6",
-        "cycles": 2012
+        "cycles": 1895
       },
       {
         "node": 0,
@@ -197,7 +197,7 @@
         "node": 10,
         "op": "Softmax",
         "engine": "cva6",
-        "cycles": 924
+        "cycles": 915
       },
       {
         "node": 0,
@@ -275,7 +275,7 @@
         "node": 1,
         "op": "Relu",
         "engine": "cva6",
-        "cycles": 30521
+        "cycles": 30508
       },
       {
         "node": 2,
@@ -329,7 +329,7 @@
         "node": 10,
         "op": "Softmax",
         "engine": "cva6",
-        "cycles": 838
+        "cycles": 814
       },
       {
         "node": 0,
@@ -407,7 +407,7 @@
         "node": 1,
         "op": "Relu",
         "engine": "cva6",
-        "cycles": 30432
+        "cycles": 30419
       },
       {
         "node": 2,
@@ -461,7 +461,7 @@
         "node": 10,
         "op": "Softmax",
         "engine": "cva6",
-        "cycles": 804
+        "cycles": 791
       },
       {
         "node": 0,
@@ -527,7 +527,7 @@
         "node": 10,
         "op": "Softmax",
         "engine": "cva6",
-        "cycles": 815
+        "cycles": 806
       },
       {
         "node": 0,
@@ -605,7 +605,7 @@
         "node": 1,
         "op": "Relu",
         "engine": "cva6",
-        "cycles": 30467
+        "cycles": 30454
       },
       {
         "node": 2,
@@ -659,7 +659,7 @@
         "node": 10,
         "op": "Softmax",
         "engine": "cva6",
-        "cycles": 827
+        "cycles": 805
       },
       {
         "node": 0,
@@ -857,7 +857,7 @@
         "node": 10,
         "op": "Softmax",
         "engine": "cva6",
-        "cycles": 801
+        "cycles": 792
       },
       {
         "node": 0,
@@ -935,7 +935,7 @@
         "node": 1,
         "op": "Relu",
         "engine": "cva6",
-        "cycles": 30637
+        "cycles": 30624
       },
       {
         "node": 2,
@@ -989,7 +989,7 @@
         "node": 10,
         "op": "Softmax",
         "engine": "cva6",
-        "cycles": 842
+        "cycles": 831
       },
       {
         "node": 0,
@@ -1067,7 +1067,7 @@
         "node": 1,
         "op": "Relu",
         "engine": "cva6",
-        "cycles": 30533
+        "cycles": 30546
       },
       {
         "node": 2,
@@ -1121,12 +1121,12 @@
         "node": 10,
         "op": "Softmax",
         "engine": "cva6",
-        "cycles": 841
+        "cycles": 830
       }
     ],
     "per_engine_cycles": {
-      "spatz": 1854233,
-      "cva6": 1755441
+      "spatz": 1853896,
+      "cva6": 1755408
     },
     "waits": [],
     "log_tail": [
@@ -1135,25 +1135,25 @@
       "[HES-PROG] sample=16/16 node=7 op=Gemm engine_id=2 cycles=2061",
       "[HES-PROG] sample=16/16 node=8 op=Relu engine_id=0 cycles=398",
       "[HES-PROG] sample=16/16 node=9 op=Gemm engine_id=2 cycles=1183",
-      "[HES-PROG] sample=16/16 node=10 op=Softmax engine_id=0 cycles=841",
-      "[HES-KWS] clips=16 correct=16 agree_with_onnx=16 mfcc_maxdiff_e6=5 cycles_total=7491724 cycles_per_clip=468232 frontend_engine=1 frontend_busy=3620077 frontend_wait=3628001 hidden=0 snitch_busy=3620077 spatz_busy=1831089 pipelined=0 offload_failures=0",
-      "[HES-MEM] cache=/soc/icache accesses=95172 reads=95172 writes=0 hits=95056 misses=116 latency_cycles=13142",
-      "[HES-MEM] cache=/soc/dcache accesses=237813 reads=153521 writes=84292 hits=229929 misses=7884 latency_cycles=314773",
-      "[HES-MEM] cache=/soc/l2 accesses=85485 reads=1193 writes=84292 hits=84498 misses=987 latency_cycles=1037717"
+      "[HES-PROG] sample=16/16 node=10 op=Softmax engine_id=0 cycles=830",
+      "[HES-KWS] clips=16 correct=16 agree_with_onnx=16 mfcc_maxdiff_e6=5 cycles_total=7491472 cycles_per_clip=468217 frontend_engine=1 frontend_busy=3620085 frontend_wait=3628101 hidden=0 snitch_busy=3620085 spatz_busy=1831089 pipelined=0 offload_failures=0",
+      "[HES-MEM] cache=/soc/icache accesses=177800 reads=177800 writes=0 hits=177684 misses=116 latency_cycles=13052",
+      "[HES-MEM] cache=/soc/dcache accesses=237814 reads=153521 writes=84293 hits=229947 misses=7867 latency_cycles=314537",
+      "[HES-MEM] cache=/soc/l2 accesses=85471 reads=1178 writes=84293 hits=84484 misses=987 latency_cycles=1037764"
     ],
     "clips": 16,
     "correct": 16,
     "agree_with_onnx": 16,
     "mfcc_maxdiff": 5e-06,
-    "cycles": 7491724,
-    "cycles_per_clip": 468232,
+    "cycles": 7491472,
+    "cycles_per_clip": 468217,
     "accuracy": 1.0,
     "frontend_engine": "snitch",
-    "frontend_busy": 3620077,
-    "frontend_wait": 3628001,
+    "frontend_busy": 3620085,
+    "frontend_wait": 3628101,
     "hidden_cycles": 0,
     "cluster_busy": {
-      "snitch": 3620077,
+      "snitch": 3620085,
       "spatz": 1831089
     },
     "pipelined": false,
@@ -1161,21 +1161,21 @@
     "caches": [
       {
         "cache": "icache",
-        "accesses": 95172,
+        "accesses": 177800,
         "misses": 116,
-        "latency_cycles": 13142
+        "latency_cycles": 13052
       },
       {
         "cache": "dcache",
-        "accesses": 237813,
-        "misses": 7884,
-        "latency_cycles": 314773
+        "accesses": 237814,
+        "misses": 7867,
+        "latency_cycles": 314537
       },
       {
         "cache": "l2",
-        "accesses": 85485,
+        "accesses": 85471,
         "misses": 987,
-        "latency_cycles": 1037717
+        "latency_cycles": 1037764
       }
     ]
   }

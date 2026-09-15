@@ -2,6 +2,7 @@
   "op": "Kernels_FP32_Conv_Regular_2D_Bias",
   "mapping": {
     "pin": null,
+    "host": "cva6",
     "nodes": [
       {
         "node": "_EXTRACT_CONV_PASS_0_pad",
@@ -17,27 +18,27 @@
   },
   "result": {
     "status": "ok",
-    "wall_s": 1.4,
+    "wall_s": 1.1,
     "nodes": [
       {
         "node": 0,
         "op": "Pad",
         "engine": "cva6",
-        "cycles": 128075
+        "cycles": 127963
       },
       {
         "node": 1,
         "op": "Conv",
         "engine": "spatz",
-        "cycles": 117456
+        "cycles": 118513
       }
     ],
     "per_engine_cycles": {
-      "cva6": 128075,
-      "spatz": 117456
+      "cva6": 127963,
+      "spatz": 118513
     },
     "waits": [],
-    "cycles": 248588,
+    "cycles": 249357,
     "errors": 0,
     "outputs": 840,
     "maxdiff": 0.0,
@@ -45,21 +46,21 @@
     "caches": [
       {
         "cache": "icache",
-        "accesses": 76279,
-        "misses": 70,
-        "latency_cycles": 7942
+        "accesses": 3336,
+        "misses": 68,
+        "latency_cycles": 7656
       },
       {
         "cache": "dcache",
-        "accesses": 41340,
-        "misses": 21417,
-        "latency_cycles": 203047
+        "accesses": 41367,
+        "misses": 21425,
+        "latency_cycles": 192696
       },
       {
         "cache": "l2",
-        "accesses": 21650,
-        "misses": 993,
-        "latency_cycles": 517085
+        "accesses": 21665,
+        "misses": 990,
+        "latency_cycles": 502200
       }
     ]
   }

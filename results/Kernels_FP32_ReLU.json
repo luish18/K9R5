@@ -1,0 +1,115 @@
+{
+  "op": "Kernels_FP32_ReLU",
+  "memory": "real",
+  "spatz_kernels": "tuned",
+  "results": [
+    {
+      "core": "cva6",
+      "target": "cva6_real",
+      "status": "ok",
+      "cycles": 1695,
+      "instret": null,
+      "errors": 0,
+      "outputs": 128,
+      "maxdiff": 0.0,
+      "sim_wall_s": 0.2,
+      "caches": [
+        {
+          "cache": "icache",
+          "accesses": 878,
+          "reads": 878,
+          "writes": 0,
+          "hits": 843,
+          "misses": 35,
+          "hit_rate": 0.9601,
+          "latency_cycles": 3956
+        },
+        {
+          "cache": "dcache",
+          "accesses": 860,
+          "reads": 512,
+          "writes": 348,
+          "hits": 532,
+          "misses": 328,
+          "hit_rate": 0.6186,
+          "latency_cycles": 7954
+        },
+        {
+          "cache": "l2",
+          "accesses": 425,
+          "reads": 77,
+          "writes": 348,
+          "hits": 339,
+          "misses": 86,
+          "hit_rate": 0.7976,
+          "latency_cycles": 21785
+        }
+      ]
+    },
+    {
+      "core": "snitch",
+      "target": "snitch_real",
+      "status": "ok",
+      "cycles": 2071,
+      "instret": null,
+      "errors": 0,
+      "outputs": 128,
+      "maxdiff": 0.0,
+      "sim_wall_s": 0.9
+    },
+    {
+      "core": "spatz",
+      "target": "spatz_real",
+      "status": "ok",
+      "cycles": 584,
+      "instret": null,
+      "errors": 0,
+      "outputs": 128,
+      "maxdiff": 0.0,
+      "sim_wall_s": 0.9
+    },
+    {
+      "core": "ara",
+      "target": "ara_host",
+      "status": "ok",
+      "cycles": 530,
+      "instret": 18,
+      "errors": 0,
+      "outputs": 128,
+      "maxdiff": 0.0,
+      "sim_wall_s": 0.2,
+      "caches": [
+        {
+          "cache": "icache",
+          "accesses": 1575,
+          "reads": 1575,
+          "writes": 0,
+          "hits": 1542,
+          "misses": 33,
+          "hit_rate": 0.979,
+          "latency_cycles": 25652
+        },
+        {
+          "cache": "dcache",
+          "accesses": 601,
+          "reads": 382,
+          "writes": 219,
+          "hits": 395,
+          "misses": 206,
+          "hit_rate": 0.6572,
+          "latency_cycles": 6706
+        },
+        {
+          "cache": "l2",
+          "accesses": 294,
+          "reads": 75,
+          "writes": 219,
+          "hits": 209,
+          "misses": 85,
+          "hit_rate": 0.7109,
+          "latency_cycles": 24657
+        }
+      ]
+    }
+  ]
+}

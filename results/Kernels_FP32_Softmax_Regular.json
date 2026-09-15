@@ -12,7 +12,7 @@
       "errors": 0,
       "outputs": 512,
       "maxdiff": 0.0,
-      "sim_wall_s": 0.3,
+      "sim_wall_s": 0.2,
       "caches": [
         {
           "cache": "icache",
@@ -55,7 +55,7 @@
       "errors": 0,
       "outputs": 512,
       "maxdiff": 0.0,
-      "sim_wall_s": 1.1
+      "sim_wall_s": 1.0
     },
     {
       "core": "spatz",
@@ -67,6 +67,49 @@
       "outputs": 512,
       "maxdiff": 0.0,
       "sim_wall_s": 1.0
+    },
+    {
+      "core": "ara",
+      "target": "ara_host",
+      "status": "ok",
+      "cycles": 31327,
+      "instret": 18,
+      "errors": 0,
+      "outputs": 512,
+      "maxdiff": 0.0,
+      "sim_wall_s": 0.2,
+      "caches": [
+        {
+          "cache": "icache",
+          "accesses": 12047,
+          "reads": 12047,
+          "writes": 0,
+          "hits": 12009,
+          "misses": 38,
+          "hit_rate": 0.9968,
+          "latency_cycles": 15774
+        },
+        {
+          "cache": "dcache",
+          "accesses": 6532,
+          "reads": 5588,
+          "writes": 944,
+          "hits": 6060,
+          "misses": 504,
+          "hit_rate": 0.9232,
+          "latency_cycles": 28610
+        },
+        {
+          "cache": "l2",
+          "accesses": 1125,
+          "reads": 181,
+          "writes": 944,
+          "hits": 965,
+          "misses": 192,
+          "hit_rate": 0.8341,
+          "latency_cycles": 52583
+        }
+      ]
     }
   ]
 }

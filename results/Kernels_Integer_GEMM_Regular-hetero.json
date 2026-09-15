@@ -2,6 +2,7 @@
   "op": "Kernels_Integer_GEMM_Regular",
   "mapping": {
     "pin": null,
+    "host": "cva6",
     "nodes": [
       {
         "node": "GEMM1",
@@ -12,20 +13,20 @@
   },
   "result": {
     "status": "ok",
-    "wall_s": 1.2,
+    "wall_s": 0.9,
     "nodes": [
       {
         "node": 0,
         "op": "Gemm",
         "engine": "cva6",
-        "cycles": 575887
+        "cycles": 575780
       }
     ],
     "per_engine_cycles": {
-      "cva6": 575887
+      "cva6": 575780
     },
     "waits": [],
-    "cycles": 577419,
+    "cycles": 577166,
     "errors": 0,
     "outputs": 1024,
     "maxdiff": 0.0,
@@ -33,21 +34,21 @@
     "caches": [
       {
         "cache": "icache",
-        "accesses": 68010,
-        "misses": 59,
-        "latency_cycles": 6701
+        "accesses": 67997,
+        "misses": 60,
+        "latency_cycles": 6756
       },
       {
         "cache": "dcache",
-        "accesses": 70203,
-        "misses": 1502,
-        "latency_cycles": 116386
+        "accesses": 70208,
+        "misses": 1512,
+        "latency_cycles": 115628
       },
       {
         "cache": "l2",
-        "accesses": 1679,
-        "misses": 323,
-        "latency_cycles": 55991
+        "accesses": 1685,
+        "misses": 322,
+        "latency_cycles": 55670
       }
     ]
   }

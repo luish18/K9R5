@@ -2,6 +2,7 @@
   "op": "Kernels_FP32_ReLU",
   "mapping": {
     "pin": null,
+    "host": "cva6",
     "nodes": [
       {
         "node": "relu_node",
@@ -25,7 +26,7 @@
       "cva6": 1706
     },
     "waits": [],
-    "cycles": 3207,
+    "cycles": 3061,
     "errors": 0,
     "outputs": 128,
     "maxdiff": 0.0,
@@ -33,21 +34,21 @@
     "caches": [
       {
         "cache": "icache",
-        "accesses": 1116,
+        "accesses": 1115,
         "misses": 50,
-        "latency_cycles": 5708
+        "latency_cycles": 5637
       },
       {
         "cache": "dcache",
-        "accesses": 889,
-        "misses": 334,
-        "latency_cycles": 7203
+        "accesses": 894,
+        "misses": 339,
+        "latency_cycles": 8147
       },
       {
         "cache": "l2",
-        "accesses": 464,
+        "accesses": 470,
         "misses": 103,
-        "latency_cycles": 24647
+        "latency_cycles": 24035
       }
     ]
   }
