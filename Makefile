@@ -121,8 +121,10 @@ mesh-test:
 # Run one op on the whole SoC, with Deeploy mapping each node to an engine.
 #   make hetero OP=Tests/Kernels/FP32/GEMM/Regular
 #   make hetero OP=... PIN=snitch      force one engine, for the comparison
+#   make hetero OP=... HOST=ara        the SoC whose CVA6 carries an Ara vector unit
+HOST ?= cva6
 hetero:
-	$(PY) pipeline/run_hetero.py $(OP) $(if $(PIN),--pin $(PIN)) $(DBG)
+	$(PY) pipeline/run_hetero.py $(OP) --host $(HOST) $(if $(PIN),--pin $(PIN)) $(DBG)
 
 # Train the MNIST CNN, export it, and classify the embedded test images on the
 # whole SoC.  make mnist IMAGES=16  runs fewer of them.
@@ -131,7 +133,7 @@ hetero:
 IMAGES ?= 64
 mnist:
 	$(PY) pipeline/mnist.py --images $(IMAGES) $(if $(REUSE),--reuse)
-	$(PY) pipeline/run_hetero.py ops/mnist $(if $(PIN),--pin $(PIN)) $(DBG)
+	$(PY) pipeline/run_hetero.py ops/mnist --host $(HOST) $(if $(PIN),--pin $(PIN)) $(DBG)
 
 # Keyword spotting: the application that gives both clusters work at once.
 # The MFCC front-end runs on one cluster while the classifier runs on the
@@ -145,7 +147,7 @@ CLIPS ?= 16
 FE ?= snitch
 kws:
 	$(PY) pipeline/kws.py --clips $(CLIPS) $(if $(REUSE),--reuse)
-	$(PY) pipeline/run_hetero.py ops/kws --frontend $(FE) \
+	$(PY) pipeline/run_hetero.py ops/kws --frontend $(FE) --host $(HOST) \
 	  $(if $(SERIAL),--serial) $(if $(PIN),--pin $(PIN)) $(DBG)
 
 clean:

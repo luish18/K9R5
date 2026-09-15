@@ -53,8 +53,15 @@ from .engines import ClusterEngine, working_set_bytes
 # Both clusters have eight compute cores, so these are like-for-like. Spatz
 # leads on all three because its kernels vectorize the output columns -- see
 # runtime/spatz/kernels/gemm_fp32_rvv.c for why that matters so much.
+#
+# The ara row prices the same host with its Ara vector unit (--host ara): the
+# cva6 row scaled by how many fewer cycles each benchmark took under
+# `pipeline/run.py --cores cva6,ara` -- GEMM/Regular 1.65x and mymatmul 1.64x
+# faster, Conv/Regular_2D_Bias 0.63x, because GCC gathers the convolution
+# window and the vector unit issues a gather one element per burst.
 RATES: Dict[str, Dict[str, float]] = {
     "cva6": {"Gemm": 0.067, "MatMul": 0.075, "Conv": 0.070, "_default": 0.070},
+    "ara": {"Gemm": 0.111, "MatMul": 0.123, "Conv": 0.044, "_default": 0.044},
     "snitch": {"Gemm": 4.52, "MatMul": 4.07, "Conv": 0.59, "_default": 0.59},
     "spatz": {"Gemm": 11.91, "MatMul": 16.79, "Conv": 0.65, "_default": 0.65},
 }
@@ -106,16 +113,28 @@ class CostEngineMapper(EngineMapper):
 
     `pin` forces every node the named engine can execute onto it, which is what
     the mapped-versus-pinned comparison uses.
+
+    `host` is the orchestrator the board carries -- the scalar CVA6, or the
+    same core with an Ara vector unit -- and picks the rates the host engine is
+    priced at. The engine is called cva6 on both boards, but the two cores run
+    the same node at very different speeds, so pricing the vector host at the
+    scalar rates would offload work it does faster in place.
     """
 
     def __init__(self, engineDict: Dict[str, DeploymentEngine],
-                 pin: Optional[str] = None) -> None:
+                 pin: Optional[str] = None, host: str = "cva6") -> None:
         super().__init__(engineDict)
         self.pin = pin
+        self.host = host
         self.decisions = []  #: (node name, op, engine, cost) for the report
 
     def cost(self, engine: DeploymentEngine, node: gs.Node) -> float:
-        rates = RATES.get(engine.name, RATES["cva6"])
+        # The host is priced by what it is; a missing row for it is an error
+        # rather than a silent fall back to another core's measurements.
+        if engine.name == "cva6":
+            rates = RATES[self.host]
+        else:
+            rates = RATES.get(engine.name, RATES["cva6"])
         rate = rates.get(node.op, rates["_default"])
         compute = node_macs(node) / rate
         overhead = OFFLOAD_FIXED.get(engine.name, 0)
@@ -140,12 +159,12 @@ class CostEngineMapper(EngineMapper):
         return best
 
 
-def make_mapper(pin: Optional[str] = None):
+def make_mapper(pin: Optional[str] = None, host: str = "cva6"):
     """A CostEngineMapper factory the deployer can instantiate."""
 
     class _Mapper(CostEngineMapper):
 
         def __init__(self, engineDict):
-            super().__init__(engineDict, pin = pin)
+            super().__init__(engineDict, pin = pin, host = host)
 
     return _Mapper

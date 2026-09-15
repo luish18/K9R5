@@ -86,9 +86,9 @@ def resolve_op(op: str) -> Path:
     sys.exit(f"error: cannot find network.onnx under '{op}'")
 
 
-def generate(test_dir: Path, gen_dir: Path, pin, debug) -> dict:
+def generate(test_dir: Path, gen_dir: Path, pin, debug, host = "cva6") -> dict:
     cmd = [str(PYTHON), str(ROOT / "pipeline" / "hetero_platform" / "generate.py"),
-           "-t", str(test_dir), "-d", str(gen_dir)]
+           "-t", str(test_dir), "-d", str(gen_dir), "--host", host]
     if pin:
         cmd += ["--pin", pin]
     r = subprocess.run(cmd, capture_output = not debug, text = True)
@@ -440,7 +440,7 @@ def main():
     gen_dir = work / "gen"
 
     print(f"[1/3] Deeploy: {test_dir.name}/network.onnx -> C, mapped across engines")
-    mapping = generate(test_dir, gen_dir, args.pin, args.debug)
+    mapping = generate(test_dir, gen_dir, args.pin, args.debug, args.host)
     mapping["host"] = args.host
 
     print(f"[2/3] build: {args.host} host + snitch cluster + spatz cluster")
