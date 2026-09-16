@@ -224,7 +224,8 @@ def parse_caches(out: str) -> list[dict]:
     """Per-cache counters, printed by the timing caches at the end of a run."""
     caches = []
     for m in re.finditer(r"\[HES-MEM\] cache=(\S+) accesses=(\d+) reads=(\d+) writes=(\d+) "
-                         r"hits=(\d+) misses=(\d+) latency_cycles=(\d+)", out):
+                         r"hits=(\d+) misses=(\d+) latency_cycles=(\d+)"
+                         r"(?: dynamic_pj=(\S+) leakage_pj=(\S+))?", out):
         # Hits and misses are counted per line looked up, so an access that
         # straddles two lines contributes two of them.
         lookups = int(m.group(5)) + int(m.group(6))
@@ -237,6 +238,8 @@ def parse_caches(out: str) -> list[dict]:
             "misses": int(m.group(6)),
             "hit_rate": round(int(m.group(5)) / lookups, 4) if lookups else None,
             "latency_cycles": int(m.group(7)),
+            "dynamic_pj": float(m.group(8)) if m.group(8) else None,
+            "leakage_pj": float(m.group(9)) if m.group(9) else None,
         })
     return caches
 

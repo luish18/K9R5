@@ -27,7 +27,7 @@
 #define HES_STDOUT_BASE                  0xc0000000u
 #define HES_CONTROL_REGS_BASE            0xd0000000u
 #define HES_DRAM_BASE                    0xb0000000u
-#define HES_HOST_HARTID                  16
+#define HES_HOST_HARTID                  18
 #define HES_HOST_SCRATCH                 0x82000000u  /* free main memory past the host's image */
 #define HES_HOST_SCRATCH_SIZE            0x02000000u
 

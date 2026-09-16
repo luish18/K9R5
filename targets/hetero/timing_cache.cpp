@@ -119,6 +119,21 @@ private:
     // pay bandwidth and not just latency.
     int64_t next_level_free;
 
+    // Power. GVSoC accumulates energy during the simulation from the activity
+    // the model reports, so these are charged on the same paths as the counters
+    // below rather than estimated afterwards from them. Every other level of
+    // this hierarchy already has power sources (memory.cpp declares them, and
+    // the ISS charges per instruction group); this cache was the one component
+    // that contributed nothing, which would have read as "the caches are free".
+    //
+    // A refill is separate from an access on purpose: a hit touches the tag and
+    // data arrays once, while a miss moves a whole line across the port to the
+    // next level, and the two differ by far more than a scale factor.
+    vp::PowerSource read_power;
+    vp::PowerSource write_power;
+    vp::PowerSource refill_power;
+    vp::PowerSource background_power;
+
     // Statistics, reported on stop() when the 'stats' property is set.
     uint64_t nb_read;
     uint64_t nb_write;
@@ -192,6 +207,17 @@ TimingCache::TimingCache(vp::ComponentConf &config)
     this->write_allocate = this->get_js_config()->get_child_bool("write_allocate");
     this->stats = this->get_js_config()->get_child_bool("stats");
 
+    // Unset in the config, new_power_source leaves the source contributing
+    // nothing, so a board with no power model behaves exactly as before.
+    this->power.new_power_source("background", &this->background_power,
+                                 this->get_js_config()->get("**/background"));
+    this->power.new_power_source("read", &this->read_power,
+                                 this->get_js_config()->get("**/read"));
+    this->power.new_power_source("write", &this->write_power,
+                                 this->get_js_config()->get("**/write"));
+    this->power.new_power_source("refill", &this->refill_power,
+                                 this->get_js_config()->get("**/refill"));
+
     int store_buffer_size = this->get_js_config()->get_child_int("store_buffer_size");
     this->store_buffer_cycles = (int64_t)store_buffer_size * this->write_cycles;
 
@@ -235,6 +261,14 @@ void TimingCache::reset(bool active)
         this->nb_hit = 0;
         this->nb_miss = 0;
         this->nb_latency_cycles = 0;
+
+        this->background_power.leakage_power_start();
+        this->background_power.dynamic_power_start();
+    }
+    else
+    {
+        this->background_power.leakage_power_stop();
+        this->background_power.dynamic_power_stop();
     }
 }
 
@@ -324,10 +358,18 @@ int64_t TimingCache::access(uint64_t addr, uint64_t size, bool is_write,
     if (is_write)
     {
         this->nb_write++;
+        if (this->power.is_enabled())
+        {
+            this->write_power.account_energy_quantum();
+        }
     }
     else
     {
         this->nb_read++;
+        if (this->power.is_enabled())
+        {
+            this->read_power.account_energy_quantum();
+        }
     }
 
     // The tag lookup itself always costs the hit latency.
@@ -362,6 +404,14 @@ int64_t TimingCache::access(uint64_t addr, uint64_t size, bool is_write,
         if (!allocate)
         {
             continue;
+        }
+
+        // Past this point the line really is transferred, so this is where the
+        // line-transfer energy belongs -- not on every miss, since a
+        // write-through store that misses never pulls the line in.
+        if (this->power.is_enabled())
+        {
+            this->refill_power.account_energy_quantum();
         }
 
         this->next_level_free = start + this->refill_cycles;
@@ -448,12 +498,37 @@ void TimingCache::stop()
     if (this->stats)
     {
         uint64_t nb_access = this->nb_read + this->nb_write;
+        // Energy is on the same line as the counters that produced it, so a
+        // result can never carry one without the other. Both are zero unless
+        // the run enabled --power.
+        //
+        // The unit is PICOJOULES, not joules: GVSoC accumulates in whatever
+        // unit the power table declares, and hetero/power.py declares pJ (as
+        // the Siracusa model it is anchored on does). Verified numerically --
+        // the reported figure equals accesses * per-access pJ + refills *
+        // refill pJ to ten significant figures.
+        //
+        // KNOWN GAP: leakage reports zero. The source is registered and
+        // leakage_power_start() is called on reset, the same way
+        // core/models/memory/memory.cpp does it, but nothing accumulates. The
+        // likely cause is that the power engine needs a supply state and
+        // voltage set on the block before static power is integrated
+        // (BlockPower::power_supply_set_all / voltage_set_all), which no board
+        // in this repository calls. Until that is resolved, treat reported
+        // energy as DYNAMIC ONLY -- which is the activity-driven part a sweep
+        // over geometry is mostly comparing anyway, but it means a design
+        // cannot be charged for the static cost of a larger array.
+        double dynamic_pj = 0, leakage_pj = 0;
+        if (this->power.is_enabled())
+        {
+            this->power.get_total_energy(&dynamic_pj, &leakage_pj);
+        }
         printf("[HES-MEM] cache=%s accesses=%llu reads=%llu writes=%llu hits=%llu misses=%llu "
-               "latency_cycles=%llu\n",
+               "latency_cycles=%llu dynamic_pj=%.9g leakage_pj=%.9g\n",
                this->get_path().c_str(), (unsigned long long)nb_access,
                (unsigned long long)this->nb_read, (unsigned long long)this->nb_write,
                (unsigned long long)this->nb_hit, (unsigned long long)this->nb_miss,
-               (unsigned long long)this->nb_latency_cycles);
+               (unsigned long long)this->nb_latency_cycles, dynamic_pj, leakage_pj);
         fflush(stdout);
     }
 }

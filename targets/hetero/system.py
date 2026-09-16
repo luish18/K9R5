@@ -13,12 +13,13 @@
 #
 
 from hetero import memsys  # noqa: F401  (re-exported for the header generator)
+from hetero.design import get as _d
 
 # --- Clock -----------------------------------------------------------------
 #
 # One clock domain for the whole SoC: a cycle difference between two engines
 # is a difference in work done per cycle, not in how they were clocked.
-FREQUENCY = 10_000_000
+FREQUENCY = _d('FREQUENCY', 10_000_000)
 
 # --- Main memory -----------------------------------------------------------
 #
@@ -63,25 +64,34 @@ BOOTROM_SIZE = 0x0001_0000
 # holds 128 fp32 against a Spatz core's 16. Lanes and lane width are kept the
 # same as Spatz so that a comparison between them isolates the register file
 # and the memory side rather than confounding all three.
-HOST_VLEN = 4096
-HOST_NB_LANES = 4
-HOST_LANE_WIDTH = 8
-
-# The CVA6 does not sit in a cluster, so its hartid is picked above every
-# cluster hartid rather than colliding with core 0 of the Snitch cluster.
-HOST_HARTID = 16
+HOST_VLEN = _d('HOST_VLEN', 4096)
+HOST_NB_LANES = _d('HOST_NB_LANES', 4)
+HOST_LANE_WIDTH = _d('HOST_LANE_WIDTH', 8)
 
 # --- Cluster address map ---------------------------------------------------
 #
 # Fixed by ClusterArch in GVSoC (pulp/snitch/snitch_cluster/snitch_cluster.py):
 # TCDM at the cluster base, then the peripherals, then the zero memory.
+# TCDM_SIZE is the swept value; everything after it follows, so the windows
+# cannot disagree with each other the way four independent literals could.
+# GVSoC's own ClusterArch hardcodes the peripheral at base+0x20000 and the zero
+# memory at base+0x30000, so a non-default TCDM size also needs the retune in
+# hetero/soc.py -- which is what enforces the two stay consistent.
 TCDM_OFFSET = 0x0000_0000
-TCDM_SIZE = 0x0002_0000          # 128 KiB, banked, single cycle
-PERIPHERAL_OFFSET = 0x0002_0000
+TCDM_SIZE = _d('TCDM_SIZE', 0x0002_0000)   # 128 KiB, banked, single cycle
 PERIPHERAL_SIZE = 0x0001_0000
-ZERO_MEM_OFFSET = 0x0003_0000
 ZERO_MEM_SIZE = 0x0001_0000
-CLUSTER_WINDOW = 0x0004_0000     # per-cluster slice of the address map
+PERIPHERAL_OFFSET = TCDM_OFFSET + TCDM_SIZE
+ZERO_MEM_OFFSET = PERIPHERAL_OFFSET + PERIPHERAL_SIZE
+CLUSTER_WINDOW = ZERO_MEM_OFFSET + ZERO_MEM_SIZE  # per-cluster slice of the map
+
+# --- On-chip interconnect --------------------------------------------------
+#
+# Bytes per cycle of the two AXI crossbars in the SoC. The narrow one carries
+# the host's accesses to cluster address space; the wide one carries cluster
+# DMA and instruction refills to main memory. Both were literals in soc.py.
+NARROW_AXI_WIDTH = _d('NARROW_AXI_WIDTH', 8)
+WIDE_AXI_WIDTH = _d('WIDE_AXI_WIDTH', 64)
 
 # --- Cluster peripheral registers ------------------------------------------
 #
@@ -115,7 +125,7 @@ class Cluster:
 
     def __init__(self, name, base, nb_core, use_spatz, isa, load_base, load_size,
                  nb_perf_counters, core_type='accurate', spatz_nb_lanes=4,
-                 first_hartid=0):
+                 spatz_lane_width=8, spatz_vlen=512, first_hartid=0):
         # A Spatz cluster's vector load/store unit is wired to the cluster TCDM
         # only (SnitchCluster binds o_VLSU straight to the TCDM interleaver), so
         # a vectorized kernel reading main memory returns garbage rather than
@@ -130,6 +140,12 @@ class Cluster:
         self.isa = isa
         self.core_type = core_type
         self.spatz_nb_lanes = spatz_nb_lanes
+        # GVSoC reaches neither of these: ClusterArch copies five fields and
+        # SnitchCluster constructs its cores with a fixed argument list that has
+        # no vlen, so snitch_core.py takes its own defaults. hetero/soc.py
+        # applies both to the built cluster instead -- see retune_spatz_vu().
+        self.spatz_lane_width = spatz_lane_width
+        self.spatz_vlen = spatz_vlen
         self.first_hartid = first_hartid
         self.load_base = load_base
         self.load_size = load_size
@@ -217,7 +233,12 @@ class Cluster:
 
 
 class _ClusterProps:
-    """Exactly the five fields ClusterArch.__init__ reads, per cluster."""
+    """Exactly the five fields ClusterArch.__init__ reads, per cluster.
+
+    spatz_lane_width and spatz_vlen are deliberately *not* here: ClusterArch
+    drops every field it does not name, so adding them would be silently
+    ignored. hetero/soc.py applies them to the built cluster instead.
+    """
 
     def __init__(self, cluster):
         self.nb_core_per_cluster = cluster.nb_core
@@ -235,7 +256,7 @@ class _ClusterProps:
 SNITCH_CLUSTER = Cluster(
     name='snitch',
     base=0x1000_0000,
-    nb_core=9,
+    nb_core=_d('SNITCH_NB_CORE', 9),
     use_spatz=False,
     core_type='accurate',
     isa='rv32imfdca',
@@ -256,11 +277,13 @@ SNITCH_CLUSTER = Cluster(
 SPATZ_CLUSTER = Cluster(
     name='spatz',
     base=0x0010_0000,
-    nb_core=9,
+    nb_core=_d('SPATZ_NB_CORE', 9),
     use_spatz=True,
     core_type='accurate',   # ignored: a Spatz cluster always uses SnitchFast
     isa='rv32imfdcav',
-    spatz_nb_lanes=4,
+    spatz_nb_lanes=_d('SPATZ_NB_LANES', 4),
+    spatz_lane_width=_d('SPATZ_LANE_WIDTH', 8),
+    spatz_vlen=_d('SPATZ_VLEN', 512),
     nb_perf_counters=2,
     first_hartid=SNITCH_CLUSTER.nb_core,
     load_base=SPATZ_LOAD_BASE,
@@ -268,6 +291,23 @@ SPATZ_CLUSTER = Cluster(
 )
 
 CLUSTERS = [SNITCH_CLUSTER, SPATZ_CLUSTER]
+
+# The CVA6 does not sit in a cluster, so its hartid is picked above every
+# cluster hartid rather than colliding with one of them. It has to be *derived*
+# rather than a literal: it used to be a hardcoded 16, which the Spatz cluster
+# had already grown into (first_hartid 9 + 9 cores = 9..17), so the host shared
+# core 7's id. Nothing keyed on it -- crt0_host.S wants it only so traces can
+# tell the cores apart -- but it made trace attribution ambiguous, and any
+# increase in a cluster's core count made it worse.
+HOST_HARTID = max(c.first_hartid + c.nb_core for c in CLUSTERS)
+
+# Two engines must never share a hartid. Cheap to assert, and the assertion is
+# what lets nb_core be swept without re-deriving this by hand each time.
+_hartids = [h for c in CLUSTERS for h in range(c.first_hartid, c.first_hartid + c.nb_core)]
+if len(set(_hartids)) != len(_hartids) or HOST_HARTID in _hartids:
+    raise RuntimeError(
+        f"hartid collision: clusters occupy {sorted(set(_hartids))} and the host "
+        f"takes {HOST_HARTID}")
 
 # --- The job mailbox -------------------------------------------------------
 #

@@ -43,7 +43,7 @@ from pulp.snitch.snitch_cluster.snitch_cluster import ClusterArch, SnitchCluster
 from pulp.stdout.stdout_v3 import Stdout
 from vp.clock_domain import Clock_domain
 
-from hetero import memsys, system
+from hetero import memsys, power, system
 from hetero.timing_cache import TimingCache
 
 # The three ELFs of a run. gapy carries a single --binary, which the host
@@ -58,6 +58,82 @@ ELF_ENV = {
 def elf_entry(path: str) -> int:
     with open(path, 'rb') as f:
         return ELFFile(f)['e_entry']
+
+
+def retune_tcdm(arch, cluster):
+    """Resize the cluster TCDM and move the windows that sit above it.
+
+    GVSoC's ClusterArch hardcodes a 128 KiB TCDM at the cluster base, the
+    peripherals at base+0x20000 and the zero memory at base+0x30000
+    (snitch_cluster.py, class Tcdm and the two Area() calls beside it), so a
+    different TCDM size has to be applied to the arch object before the cluster
+    is built from it. Everything downstream -- the bank sizes, the interleaver
+    offset mask, the DMA's local window, the router mappings -- reads these
+    fields off arch rather than re-deriving them, so this is the only place
+    that needs to change.
+
+    The Area objects are mutated rather than replaced: Area is defined inside a
+    `if os.environ.get('USE_GVRUN') is None:` block upstream, so constructing
+    one here would bind us to that branch.
+    """
+    # Raise rather than silently model something else, the same way
+    # snitch_memsys.retune_hbm does.
+    if arch.tcdm.nb_superbanks != 4 or arch.tcdm.nb_banks_per_superbank != 8:
+        raise RuntimeError(
+            f"expected a 4x8 TCDM on cluster {cluster.name}, found "
+            f"{arch.tcdm.nb_superbanks}x{arch.tcdm.nb_banks_per_superbank} "
+            "-- the GVSoC Snitch cluster layout changed")
+    if arch.tcdm.area.base != cluster.base:
+        raise RuntimeError(
+            f"expected the TCDM of cluster {cluster.name} at its base "
+            f"0x{cluster.base:x}, found 0x{arch.tcdm.area.base:x}")
+
+    nb_banks = arch.tcdm.nb_superbanks * arch.tcdm.nb_banks_per_superbank
+    if system.TCDM_SIZE % nb_banks != 0:
+        raise RuntimeError(
+            f"TCDM_SIZE 0x{system.TCDM_SIZE:x} does not divide evenly into "
+            f"{nb_banks} banks")
+    if system.TCDM_SIZE & (system.TCDM_SIZE - 1):
+        # The interleaver masks with area.size - 1 (snitch_cluster.py), so a
+        # non-power-of-two TCDM would alias rather than fail.
+        raise RuntimeError(f"TCDM_SIZE 0x{system.TCDM_SIZE:x} must be a power of two")
+
+    arch.tcdm.area.size = system.TCDM_SIZE
+    arch.tcdm.bank_size = system.TCDM_SIZE // nb_banks
+
+    arch.peripheral.base = cluster.base + system.PERIPHERAL_OFFSET
+    arch.peripheral.size = system.PERIPHERAL_SIZE
+    arch.zero_mem.base = cluster.base + system.ZERO_MEM_OFFSET
+    arch.zero_mem.size = system.ZERO_MEM_SIZE
+
+
+def retune_spatz_vu(comp, cluster):
+    """Apply the Spatz vector geometry GVSoC's cluster will not carry.
+
+    ClusterArch copies five fields off the properties object, and SnitchCluster
+    builds its cores with a fixed argument list that has no vlen, so
+    snitch_core.py always takes its own defaults (vlen=512, lane_width=8).
+
+    vlen is a compile-time define, so it has to be rewritten in the core's
+    c_flags -- which works because c_flags are hashed into the generated
+    component name lazily, inside Component.__build(), long after this
+    constructor has returned. lane_width is a plain JSON property, so setting it
+    costs nothing at all.
+    """
+    tag = '-DCONFIG_ISS_VLEN='
+    for core in comp.cores:
+        hits = [f for f in core.c_flags if f.startswith(tag)]
+        if len(hits) != 1:
+            raise RuntimeError(
+                f"expected exactly one {tag} flag on {core.name}, found {len(hits)} "
+                "-- the GVSoC Spatz core stopped setting VLEN through add_c_flags")
+        # Replace in place, never move. get_generated_component() hashes
+        # ''.join(sources + cflags + libs), so the flag's *position* is part of
+        # the component name: appending it instead would rename the model even
+        # when the value is unchanged, and ask for a .so that was never built.
+        core.c_flags = [f'{tag}{int(cluster.spatz_vlen)}' if f.startswith(tag) else f
+                        for f in core.c_flags]
+        core.add_property('vu/lane_width', cluster.spatz_lane_width)
 
 
 class HeteroSoc(st.Component):
@@ -85,6 +161,11 @@ class HeteroSoc(st.Component):
         # because every access -- hit or miss -- is forwarded down to it.
         mem = memory.Memory(self, 'mem', size=system.HBM_SIZE, atomics=True,
                             width_log2=-1)
+        # Main memory is off-chip: it gets the DRAM estimate, NOT the SRAM
+        # scaling rule the caches and TCDM use. hetero/power.py explains why the
+        # two must not be mixed, and flags this as the weakest coefficient in
+        # the model.
+        mem.add_properties(power.dram_model())
 
         # Boot ROM of the Snitch cluster model. Nothing fetches from it (each
         # cluster boots straight into its own ELF entry), but the window has to
@@ -103,8 +184,8 @@ class HeteroSoc(st.Component):
         # SoC interconnect. Narrow carries core data accesses and everything
         # the host issues at a cluster; wide carries cluster DMA and
         # instruction-cache refills.
-        narrow_axi = router.Router(self, 'narrow_axi', bandwidth=8)
-        wide_axi = router.Router(self, 'wide_axi', bandwidth=64)
+        narrow_axi = router.Router(self, 'narrow_axi', bandwidth=system.NARROW_AXI_WIDTH)
+        wide_axi = router.Router(self, 'wide_axi', bandwidth=system.WIDE_AXI_WIDTH)
 
         # Clusters. Each gets its own properties object, which is what lets one
         # board hold a 9-core Snitch cluster and a 2-core Spatz pair.
@@ -119,13 +200,27 @@ class HeteroSoc(st.Component):
                                auto_fetch=False, boot_addr=boot_addr)
             # parser=None on purpose: SnitchCluster would otherwise hand the
             # host's rv64 ELF to its rv32 cores as debug info.
-            clusters[cluster.name] = SnitchCluster(self, f'cluster_{cluster.name}',
-                                                   arch, parser=None, entry=boot_addr)
+            retune_tcdm(arch, cluster)
+            comp = SnitchCluster(self, f'cluster_{cluster.name}',
+                                 arch, parser=None, entry=boot_addr)
+            if cluster.use_spatz:
+                retune_spatz_vu(comp, cluster)
+            power.attach_cluster_tcdm(comp, arch)
+            clusters[cluster.name] = comp
 
         # Host cache hierarchy, geometry and latencies from hetero/memsys.py.
         icache = TimingCache(self, 'icache', stats=True, **memsys.ICACHE)
         dcache = TimingCache(self, 'dcache', stats=True, **memsys.DCACHE)
         l2 = TimingCache(self, 'l2', stats=True, **memsys.L2)
+
+        # Energy coefficients, scaled to each cache's own geometry. Without
+        # these every cache reports zero energy under --power, which reads as
+        # "the memory hierarchy is free" -- the opposite of what a sweep over
+        # cache sizes needs to see. See hetero/power.py for the anchor and the
+        # scaling rule.
+        for cache, geom in ((icache, memsys.ICACHE), (dcache, memsys.DCACHE),
+                            (l2, memsys.L2)):
+            cache.add_properties(power.cache_model(geom['size'], geom['line_size']))
 
         # Data-side router: splits cacheable main memory from everything a
         # cache must never hold -- the peripherals, and the cluster windows,

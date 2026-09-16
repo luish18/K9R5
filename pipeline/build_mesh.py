@@ -15,6 +15,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "pipeline"))
 
+import pathlib  # noqa: E402
+
 from common import TC, sh, set_debug  # noqa: E402
 
 RUNTIME = ROOT / "runtime"
@@ -34,6 +36,36 @@ LINK_LIBS = ["-Wl,--gc-sections", "-Wl,--allow-multiple-definition", "-lc", "-lm
 
 # Shared include path for every image in a run.
 INCS = [RUNTIME / "common", MESH, GENERIC_LIB / "inc"]
+
+
+def set_mesh_dir(path):
+    """Build against a different copy of runtime/mesh.
+
+    A design-space sweep gives every design point its own copy, so that
+    concurrent cells do not regenerate each other's hes_system.h while a
+    compile is reading it.
+
+    It has to be a *copy of the whole directory*, not just the generated files
+    with an -I in front of it. runtime/mesh/hes_host.h, hes_cluster.h and
+    hes_mailbox.h all `#include "hes_system.h"` with quotes, and GCC resolves a
+    quoted include relative to the including file's own directory before it
+    looks at any -I. So a cell that only overrode the include path would link
+    the cell's linker script against the *shared* header -- no error, just
+    wrong addresses and plausible wrong cycle counts. sweep/cell.py copies the
+    directory; this function points the builder at the copy.
+
+    The Image dataclasses capture their linker and crt0 paths at
+    class-definition time, so those have to be rebound too, not just MESH.
+    """
+    global MESH, INCS
+    MESH = pathlib.Path(path)
+    INCS = [RUNTIME / "common", MESH, GENERIC_LIB / "inc"]
+    for image, linker, crt0 in ((HOST, "host.ld", "crt0_host.S"),
+                                (HOST_ARA, "host.ld", "crt0_host.S"),
+                                (SNITCH, "snitch.ld", "crt0_cluster.S"),
+                                (SPATZ, "spatz.ld", "crt0_cluster.S")):
+        image.linker = MESH / linker
+        image.crt0 = MESH / crt0
 
 # First-party kernels every image gets, on the same terms as the Deeploy
 # Generic library: compiled with the image's kernel flags (so a vector core
@@ -240,11 +272,19 @@ def main():
                     help="cluster program under runtime/mesh (default: %(default)s)")
     ap.add_argument("--host-extra", default=[], action="append",
                     help="extra host source, relative to runtime/mesh")
+    ap.add_argument("--mesh-dir", default=None,
+                    help="build against this copy of runtime/mesh (a sweep gives "
+                         "each design point its own)")
+    ap.add_argument("--work-dir", default=None,
+                    help="build into this directory instead of work/<test>")
     ap.add_argument("-d", "--debug", action="store_true")
     args = ap.parse_args()
 
     set_debug(args.debug)
-    elfs = build_test(args.test, ROOT / "work" / args.test,
+    if args.mesh_dir:
+        set_mesh_dir(args.mesh_dir)
+    work = pathlib.Path(args.work_dir) if args.work_dir else ROOT / "work" / args.test
+    elfs = build_test(args.test, work,
                       cluster_src=MESH / args.cluster,
                       host_extra=[MESH / s for s in args.host_extra])
     for name, elf in elfs.items():
