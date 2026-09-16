@@ -27,6 +27,9 @@ is a guess about hardware. --pin overrides the whole thing, which is how the
 mapper's choice gets checked against the alternatives rather than assumed.
 """
 
+import json
+import os
+from pathlib import Path
 from typing import Dict, Optional
 
 import onnx_graphsurgeon as gs
@@ -73,6 +76,35 @@ OFFLOAD_FIXED = {"cva6": 0, "snitch": 1200, "spatz": 1200}
 
 # Cycles per byte staged into TCDM and back, from the same measurements.
 OFFLOAD_PER_BYTE = {"cva6": 0.0, "snitch": 0.10, "spatz": 0.10}
+
+
+# A design-space sweep changes the very hardware these numbers measure, so a
+# swept design would otherwise be mapped by another machine's arithmetic -- a
+# 16-lane Spatz kept being handed work at a 4-lane Spatz's prices. Each design
+# point re-measures the whole table with runtime/tests/mesh_calib.c and points
+# HES_RATES at the result; see pipeline/sweep/calibrate.py.
+#
+# Unset, the committed tables above are used unchanged, so nothing about the
+# existing pipeline moves.
+def _load_measured_tables() -> None:
+    path = os.environ.get("HES_RATES")
+    if not path:
+        return
+    blob = json.loads(Path(path).read_text())
+    for name, table in (("RATES", RATES), ("OFFLOAD_FIXED", OFFLOAD_FIXED),
+                        ("OFFLOAD_PER_BYTE", OFFLOAD_PER_BYTE)):
+        measured = blob.get(name)
+        if measured is None:
+            raise RuntimeError(f"{path} has no {name} -- it is not a table "
+                               "produced by pipeline/sweep/calibrate.py")
+        # Replace rather than merge: a partial table would silently mix two
+        # machines' measurements, which is the whole failure this avoids. The
+        # host row is the exception -- it is named for the board (cva6/ara) and
+        # the calibration only ever measures the one it ran on.
+        table.update(measured)
+
+
+_load_measured_tables()
 
 
 def node_macs(node: gs.Node) -> float:
