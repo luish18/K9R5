@@ -33,6 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import build_mesh  # noqa: E402
 from build_mesh import HOSTS, build_network  # noqa: E402
 from common import GVSOC, PYTHON, RESULTS, ROOT, TARGETS, WORK, note_file, set_debug  # noqa: E402
 
@@ -53,8 +54,12 @@ KWS_RE = re.compile(
     r"mfcc_maxdiff_e6=(\d+) cycles_total=(\d+) cycles_per_clip=(\d+) "
     r"frontend_engine=(\d+) frontend_busy=(\d+) frontend_wait=(\d+) hidden=(\d+) "
     r"snitch_busy=(\d+) spatz_busy=(\d+) pipelined=(\d+) offload_failures=(\d+)")
+# The energy fields are optional: they are only non-zero under --power, and a
+# run without it still prints them as 0. Matching them optionally also keeps
+# this regex working against logs captured before the caches were instrumented.
 MEM_RE = re.compile(r"\[HES-MEM\] cache=(\S+) accesses=(\d+) reads=(\d+) writes=(\d+) "
-                    r"hits=(\d+) misses=(\d+) latency_cycles=(\d+)")
+                    r"hits=(\d+) misses=(\d+) latency_cycles=(\d+)"
+                    r"(?: dynamic_pj=(\S+) leakage_pj=(\S+))?")
 
 
 # An op that ships its own evaluation set brings its own host program too: one
@@ -153,7 +158,8 @@ class Progress:
 
 
 def simulate(elfs: dict, run_dir: Path, total_nodes: int, timeout_s: int,
-             stall_s: int, quiet: bool, target: str = "hetero_soc") -> dict:
+             stall_s: int, quiet: bool, target: str = "hetero_soc",
+             power: bool = False) -> dict:
     run_dir.mkdir(parents = True, exist_ok = True)
     env = dict(os.environ)
     env["PATH"] = f"{ROOT / '.venv' / 'bin'}:{env['PATH']}"
@@ -161,7 +167,14 @@ def simulate(elfs: dict, run_dir: Path, total_nodes: int, timeout_s: int,
     env["HES_ELF_SPATZ"] = str(elfs["spatz"])
 
     cmd = [str(GVSOC), f"--target-dir={TARGETS}", f"--target={target}",
-           f"--binary={elfs['host']}", "run"]
+           f"--binary={elfs['host']}"]
+    if power:
+        # Turns on GVSoC's power engine, which makes the caches and memories
+        # accumulate energy from the activity they already count. It also
+        # selects the instrumented model set, so a run costs more wall time --
+        # which is why it is opt-in rather than always on.
+        cmd.append("--power")
+    cmd.append("run")
 
     proc = subprocess.Popen(cmd, cwd = run_dir, env = env, text = True,
                             stdout = subprocess.PIPE, stderr = subprocess.STDOUT,
@@ -313,11 +326,17 @@ def simulate(elfs: dict, run_dir: Path, total_nodes: int, timeout_s: int,
             "accesses": int(m.group(2)),
             "misses": int(m.group(6)),
             "latency_cycles": int(m.group(7)),
+            # Picojoules, and dynamic only -- see the note in
+            # targets/hetero/timing_cache.cpp. Absent unless the run enabled
+            # --power, so a consumer must treat None as "not measured" rather
+            # than as zero energy.
+            "dynamic_pj": float(m.group(8)) if m.group(8) else None,
+            "leakage_pj": float(m.group(9)) if m.group(9) else None,
         } for m in caches]
     return out
 
 
-def report(op_name: str, mapping: dict, res: dict) -> None:
+def report(op_name: str, mapping: dict, res: dict, out_path = None) -> None:
     print(f"\n=== {op_name} on hetero_soc ===\n")
 
     print(f"{'node':>4}  {'op':16} {'engine':8} {'cycles':>12}")
@@ -384,17 +403,27 @@ def report(op_name: str, mapping: dict, res: dict) -> None:
     print(f"wall     {res['wall_s']}s"
           + (f"   (pinned to {mapping['pin']})" if mapping.get("pin") else ""))
 
-    RESULTS.mkdir(exist_ok = True)
-    suffix = f"-pin-{mapping['pin']}" if mapping.get("pin") else ""
-    suffix += "" if mapping.get("host", "cva6") == "cva6" else f"-{mapping['host']}"
-    if mapping.get("frontend") and mapping["frontend"] != "snitch":
-        suffix += f"-fe-{mapping['frontend']}"
-    if mapping.get("serial"):
-        suffix += "-serial"
-    out = RESULTS / f"{op_name.replace('/', '_')}-hetero{suffix}.json"
+    if out_path is not None:
+        # A sweep cell writes into its own directory: results/ is keyed only by
+        # op/pin/host/frontend, so two design points would overwrite each other.
+        out = Path(out_path)
+        out.parent.mkdir(parents = True, exist_ok = True)
+    else:
+        RESULTS.mkdir(exist_ok = True)
+        suffix = f"-pin-{mapping['pin']}" if mapping.get("pin") else ""
+        suffix += "" if mapping.get("host", "cva6") == "cva6" else f"-{mapping['host']}"
+        if mapping.get("frontend") and mapping["frontend"] != "snitch":
+            suffix += f"-fe-{mapping['frontend']}"
+        if mapping.get("serial"):
+            suffix += "-serial"
+        out = RESULTS / f"{op_name.replace('/', '_')}-hetero{suffix}.json"
     out.write_text(json.dumps({"op": op_name, "mapping": mapping, "result": res},
                               indent = 2))
-    print(f"\nresults written to {out.relative_to(ROOT)}")
+    try:
+        shown = out.relative_to(ROOT)
+    except ValueError:
+        shown = out
+    print(f"\nresults written to {shown}")
 
 
 def main():
@@ -403,6 +432,18 @@ def main():
     ap.add_argument("op", help = "op dir (network.onnx + inputs.npz + outputs.npz)")
     ap.add_argument("--pin", choices = ["cva6", "snitch", "spatz"],
                     help = "force every node the engine can run onto it")
+    ap.add_argument("--power", action = "store_true",
+                    help = "enable GVSoC power modelling, so the per-cache "
+                           "energy counters are populated (slower)")
+    ap.add_argument("--mesh-dir", default = None,
+                    help = "build against this copy of runtime/mesh (a sweep gives "
+                           "each design point its own; see build_mesh.set_mesh_dir)")
+    ap.add_argument("--tag", default = None,
+                    help = "extra component in the work directory name, so two runs "
+                           "of the same op/host/pin (e.g. two design points) do not "
+                           "share build artifacts")
+    ap.add_argument("--out", default = None,
+                    help = "write the result JSON here instead of results/")
     ap.add_argument("--host", choices = list(HOSTS), default = "cva6",
                     help = "orchestrator: the scalar CVA6, or the same core with "
                            "an Ara vector unit (default: %(default)s)")
@@ -433,9 +474,14 @@ def main():
     except ValueError:
         op_name = test_dir.name
 
+    if args.mesh_dir:
+        build_mesh.set_mesh_dir(args.mesh_dir)
+
     variant = f"{args.host}-{args.pin or 'mapped'}"
     if (test_dir / "kws_data.h").is_file():
         variant += f"-fe{args.frontend}" + ("-serial" if args.serial else "")
+    if args.tag:
+        variant += f"-{args.tag}"
     work = WORK / f"hetero_{op_name}" / variant
     gen_dir = work / "gen"
 
@@ -472,7 +518,7 @@ def main():
         mapping["serial"] = args.serial
     elfs = build_network(
         gen_dir, work,
-        host_main = (ROOT / "runtime" / "mesh" / app["main"]) if app else None,
+        host_main = (build_mesh.MESH / app["main"]) if app else None,
         extra_incs = [test_dir] if app else (),
         samples = args.images if app else 1,
         host = args.host,
@@ -480,9 +526,10 @@ def main():
 
     print(f"[3/3] simulate on {HOSTS[args.host][1]}")
     res = simulate(elfs, work / "run", len(mapping["nodes"]), args.timeout,
-                   args.stall_timeout, args.quiet, target = HOSTS[args.host][1])
+                   args.stall_timeout, args.quiet, target = HOSTS[args.host][1],
+                   power = args.power)
 
-    report(op_name, mapping, res)
+    report(op_name, mapping, res, out_path = args.out)
     sys.exit(0 if res["status"] == "ok" else 1)
 
 

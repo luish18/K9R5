@@ -387,36 +387,55 @@ def memsys_expect() -> str:
 """
 
 
+def generated(mesh: Path) -> dict:
+    """path -> content, for every file this script owns, under `mesh`.
+
+    The render functions are pure functions of hetero.system / hetero.memsys, so
+    pointing them at a different directory is only a matter of where the result
+    is written. A design-space sweep gives every cell its own directory so that
+    concurrent cells do not regenerate each other's header mid-compile.
+    """
+    note = verify_offsets()
+    out = {mesh / "hes_system.h": render(note),
+           mesh / "host.ld": host_linker(),
+           mesh / "memsys_expect.h": memsys_expect()}
+    out.update({mesh / f"{c.name}.ld": cluster_linker(c) for c in system.CLUSTERS})
+    return out, note
+
+
+def _show(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--check", action="store_true",
                     help="exit non-zero if the header on disk is out of date")
+    ap.add_argument("--out-dir", default=None, type=Path,
+                    help="write the generated files here instead of runtime/mesh "
+                         "(a sweep gives each design point its own directory)")
     args = ap.parse_args()
 
-    note = verify_offsets()
-    content = render(note)
-
-    expected = {HEADER: content, MESH / "host.ld": host_linker(),
-                MESH / "memsys_expect.h": memsys_expect()}
-    expected.update({MESH / f"{c.name}.ld": cluster_linker(c) for c in system.CLUSTERS})
+    mesh = args.out_dir if args.out_dir is not None else MESH
+    expected, note = generated(mesh)
 
     if args.check:
         for path, text in expected.items():
             current = path.read_text() if path.exists() else None
             if current != text:
-                sys.exit(f"error: {path.relative_to(ROOT)} is out of date -- run "
+                sys.exit(f"error: {_show(path)} is out of date -- run "
                          f"python pipeline/gen_system_header.py")
-        print(f"runtime/mesh generated files are up to date ({note})")
+        print(f"{_show(mesh)} generated files are up to date ({note})")
         return
 
-    MESH.mkdir(parents=True, exist_ok=True)
-    written = [(HEADER, content), (MESH / "host.ld", host_linker()),
-               (MESH / "memsys_expect.h", memsys_expect())]
-    written += [(MESH / f"{c.name}.ld", cluster_linker(c)) for c in system.CLUSTERS]
-    for path, text in written:
+    mesh.mkdir(parents=True, exist_ok=True)
+    for path, text in expected.items():
         path.write_text(text)
-    print(f"wrote {', '.join(str(p.relative_to(ROOT)) for p, _ in written)}")
+    print(f"wrote {', '.join(_show(p) for p in expected)}")
     print(f"  ({note})")
 
 
