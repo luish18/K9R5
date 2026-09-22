@@ -288,7 +288,14 @@ def main():
                       cluster_src=MESH / args.cluster,
                       host_extra=[MESH / s for s in args.host_extra])
     for name, elf in elfs.items():
-        print(f"{name:7} {elf.relative_to(ROOT)}")
+        # A build directory outside the repository root is legitimate -- a sweep
+        # cell is one -- so fall back to the full path rather than raising from
+        # a print statement.
+        try:
+            shown = elf.relative_to(ROOT)
+        except ValueError:
+            shown = elf
+        print(f"{name:7} {shown}")
 
 
 if __name__ == "__main__":
