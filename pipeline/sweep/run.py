@@ -26,6 +26,7 @@ Structure, and why:
 """
 
 import argparse
+import difflib
 import json
 import os
 import shutil
@@ -65,15 +66,166 @@ OFAT = {
 }
 
 
-def expand(grid_name: str):
-    """The design points of a named grid, baseline first."""
-    if grid_name != "ofat":
-        raise SystemExit(f"unknown grid: {grid_name}")
+def parse_knob(spec: str):
+    """One --knob KNOB=v1,v2,... into (knob, [values]).
+
+    Values go through int(v, 0), so 0x40000 and 262144 are both accepted -- the
+    sizes read naturally either way and the design file records the same number.
+
+    An unknown knob is refused rather than ignored: silently sweeping nothing
+    would produce a grid of identical designs and a sensitivity table of zeros,
+    which looks like a finding.
+    """
+    if "=" not in spec:
+        raise SystemExit(f"--knob wants KNOB=v1,v2,...; got {spec!r}")
+    knob, _, values = spec.partition("=")
+    knob = knob.strip().upper()
+    if knob not in design_mod.DEFAULTS:
+        # Substring matching misses the realistic typo: SPATZ_LANES is neither
+        # a substring nor a superstring of SPATZ_NB_LANES.
+        near = difflib.get_close_matches(knob, design_mod.DEFAULTS, n=3, cutoff=0.6)
+        hint = f" Did you mean {', '.join(near)}?" if near else ""
+        raise SystemExit(f"unknown knob {knob!r}.{hint}\n"
+                         f"  Known knobs: {', '.join(sorted(design_mod.DEFAULTS))}")
+    out = []
+    for v in values.split(","):
+        v = v.strip()
+        if not v:
+            continue
+        try:
+            out.append(int(v, 0))
+        except ValueError:
+            raise SystemExit(f"--knob {knob}: {v!r} is not an integer")
+    if not out:
+        raise SystemExit(f"--knob {knob}: no values given")
+    return knob, out
+
+
+def expand(grid_name: str, knobs=None):
+    """The design points to run, baseline first.
+
+    The baseline is always included, and always first: every number the report
+    quotes is relative to it, so a sweep without it has nothing to compare
+    against.
+    """
     designs = [{}]
-    for knob, values in OFAT.items():
-        for v in values:
-            designs.append({knob: v})
-    return designs
+    if knobs:
+        for knob, values in knobs:
+            for v in values:
+                designs.append({knob: v})
+    else:
+        if grid_name != "ofat":
+            raise SystemExit(f"unknown grid: {grid_name}")
+        for knob, values in OFAT.items():
+            for v in values:
+                designs.append({knob: v})
+
+    # Drop repeats by what the design actually resolves to, not by how it was
+    # written. Sweeping a knob over its own baseline value -- SPATZ_NB_LANES=4
+    # when 4 is the default -- otherwise runs the baseline twice and reports it
+    # as two cells.
+    seen, unique = set(), []
+    for d in designs:
+        key = design_mod.slug(d)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(d)
+    return unique
+
+
+
+class Progress:
+    """One updating line for the whole sweep, in the style run_hetero.py uses.
+
+    A screening grid is two dozen cells of half a minute each, so the useful
+    question during a run is "how far in, and how much longer" -- which a line
+    per finished cell answers only in arrears. The bar also names the phase the
+    current cell is in, because the phases have very different lengths and a
+    stall in one of them looks nothing like a stall in another.
+
+    Falls back to one line per cell when stdout is not a terminal, so piping to
+    a file or through `docker exec` without -t stays readable instead of filling
+    with carriage returns.
+    """
+
+    WIDTH = 24
+
+    def __init__(self, total: int, mode: str):
+        self.total = total
+        self.done = 0
+        self.t0 = time.time()
+        self.durations = []
+        self.cell = ""
+        self.phase = ""
+        if mode == "auto":
+            self.bar = sys.stdout.isatty()
+        else:
+            self.bar = mode == "bar"
+
+    @staticmethod
+    def _clock(seconds) -> str:
+        seconds = int(max(0, seconds))
+        return f"{seconds // 60}m{seconds % 60:02d}s" if seconds >= 60 else f"{seconds}s"
+
+    def _eta(self):
+        if not self.durations:
+            return None
+        # Median, not mean: one rebuilt or pathologically slow cell should not
+        # drag the estimate for the rest.
+        ordered = sorted(self.durations)
+        typical = ordered[len(ordered) // 2]
+        return typical * (self.total - self.done)
+
+    def start(self, cell: str) -> None:
+        self.cell = cell
+        self.phase = "starting"
+        self._render()
+
+    def step(self, phase: str) -> None:
+        self.phase = phase
+        self._render()
+
+    def finish(self, row: dict) -> None:
+        self.done += 1
+        if row.get("wall_s"):
+            self.durations.append(row["wall_s"])
+        if not self.bar:
+            cyc = (row.get("cycles_per_image") or row.get("cycles_per_clip")
+                   or row.get("cycles"))
+            print(f"[{self.done:3}/{self.total}] {row['design_slug'][:34]:34} "
+                  f"{row['model']:8} {row['status']:12} cycles={cyc} "
+                  f"wall={row.get('wall_s')}s", flush=True)
+        elif row["status"] != "ok":
+            # A failure must not scroll past behind the bar.
+            self._clear()
+            why = "; ".join(row.get("reasons", []))[:90]
+            print(f"  {row['status']:10} {row['design_slug'][:34]:34} {why}", flush=True)
+        self._render()
+
+    def _clear(self) -> None:
+        if self.bar:
+            sys.stdout.write("\r" + " " * 110 + "\r")
+
+    def _render(self) -> None:
+        if not self.bar:
+            return
+        frac = self.done / self.total if self.total else 0
+        filled = int(round(frac * self.WIDTH))
+        bar = "\u2588" * filled + "\u2591" * (self.WIDTH - filled)
+        eta = self._eta()
+        tail = f"  eta ~{self._clock(eta)}" if eta else ""
+        # Truncate the whole label, not the cell name: cutting the cell alone
+        # left a dangling separator ("design \u00b7  \u00b7 phase").
+        label = f"{self.cell} \u00b7 {self.phase}"
+        if len(label) > 44:
+            label = label[:43] + "\u2026"
+        sys.stdout.write(f"\r  [{bar}] {self.done:2}/{self.total}  {frac * 100:3.0f}%  "
+                         f"{label:44} {self._clock(time.time() - self.t0)}{tail}   ")
+        sys.stdout.flush()
+
+    def done_all(self) -> None:
+        self._clear()
 
 
 # --- running one cell -------------------------------------------------------
@@ -125,8 +277,13 @@ def calibrate(design_dir, mesh, env, host):
     return rates
 
 
-def run_cell(design, model, out_dir, host, power, images):
+def run_cell(design, model, out_dir, host, power, images, progress=None,
+             frontend=None, serial=False):
     """One (design, model) measurement."""
+    def phase(name):
+        if progress is not None:
+            progress.step(name)
+
     slug = design_mod.slug(design)
     design_dir = out_dir / "designs" / slug
     design_dir.mkdir(parents=True, exist_ok=True)
@@ -137,6 +294,10 @@ def run_cell(design, model, out_dir, host, power, images):
 
     row = {"design_slug": slug, "design": design_mod.resolve(design),
            "model": Path(model).name, "host": host}
+    if frontend:
+        row["frontend"] = frontend
+    if serial:
+        row["serial"] = True
 
     bad = design_mod.validate(design)
     if bad:
@@ -145,7 +306,10 @@ def run_cell(design, model, out_dir, host, power, images):
 
     t0 = time.time()
     try:
+        phase("mesh + header")
         mesh = prepare(design, design_dir, env)
+        # Cached per design, so this is free for every model after the first.
+        phase("calibrating" if not (design_dir / "rates.json").exists() else "calibration cached")
         rates = calibrate(design_dir, mesh, env, host)
         env["HES_RATES"] = str(rates)
 
@@ -157,6 +321,13 @@ def run_cell(design, model, out_dir, host, power, images):
                "--out", result, "--images", images, "-q"]
         if power:
             cmd.append("--power")
+        # Only meaningful for an op that runs a front-end on its own cluster;
+        # run_hetero ignores them otherwise.
+        if frontend:
+            cmd += ["--frontend", frontend]
+        if serial:
+            cmd.append("--serial")
+        phase("codegen + build + simulate")
         r = sh(cmd, env=env)
         if not result.exists():
             row.update(status="failed", reasons=[(r.stdout + r.stderr)[-1500:]])
@@ -164,7 +335,13 @@ def run_cell(design, model, out_dir, host, power, images):
         res = json.load(result.open())["result"]
         row["status"] = res.get("status", "unknown")
         for k in ("cycles", "cycles_per_image", "cycles_per_clip", "accuracy",
-                  "offload_failures", "maxdiff", "caches", "per_engine_cycles"):
+                  "offload_failures", "maxdiff", "caches", "per_engine_cycles",
+                  # KWS runs both clusters at once, so its result is a max
+                  # rather than a sum. Dropping these would leave a sweep over
+                  # cluster geometry unable to say whether a design improved the
+                  # overlap, which is the whole point of that workload.
+                  "frontend_engine", "frontend_busy", "frontend_wait",
+                  "hidden_cycles", "cluster_busy", "pipelined", "images", "clips"):
             if k in res:
                 row[k] = res[k]
         if row["status"] == "ok" and res.get("offload_failures"):
@@ -177,6 +354,7 @@ def run_cell(design, model, out_dir, host, power, images):
 
     # Area is a pure function of the design, so it costs nothing to attach and
     # makes every row self-contained for the Pareto pass.
+    phase("scoring")
     try:
         parts = area_model.breakdown({"_path": str(path)})
         row["area_au"] = sum(parts.values())
@@ -197,17 +375,39 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--models", nargs="+", required=True, help="op directories")
-    ap.add_argument("--grid", default="ofat")
+    ap.add_argument("--grid", default="ofat",
+                    help="named grid to run when no --knob is given (default: %(default)s)")
+    ap.add_argument("--knob", action="append", default=[], metavar="KNOB=v1,v2",
+                    help="sweep just this knob over these values, instead of the "
+                         "named grid. Repeatable. The baseline is always included, "
+                         "since every reported figure is relative to it. "
+                         "e.g. --knob SPATZ_NB_LANES=2,4,8")
     ap.add_argument("-o", "--out", required=True, help="sweep output directory")
     ap.add_argument("--host", default="cva6", choices=("cva6", "ara"))
     ap.add_argument("--power", action="store_true", help="measure energy too (slower)")
+    ap.add_argument("--frontend", choices=("snitch", "spatz"), default=None,
+                    help="for keyword spotting: which cluster runs the MFCC "
+                         "front-end while the other runs the classifier")
+    ap.add_argument("--serial", action="store_true",
+                    help="for keyword spotting: take turns instead of pipelining, "
+                         "which is the comparison that shows what the overlap buys")
     ap.add_argument("--images", default="16", help="samples per model run")
     ap.add_argument("--limit", type=int, default=None, help="stop after N designs")
+    ap.add_argument("--progress", choices=("auto", "bar", "lines"), default="auto",
+                    help="auto uses a bar on a terminal and one line per cell "
+                         "otherwise (default: %(default)s)")
     args = ap.parse_args()
 
-    out = Path(args.out)
+    # Resolved, not as given: every cell path derives from this, and a relative
+    # spelling made build_mesh.py fail when it tried to report an ELF path
+    # relative to the repository root.
+    out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    designs = expand(args.grid)
+    knobs = [parse_knob(k) for k in args.knob]
+    designs = expand(args.grid, knobs)
+    if knobs:
+        print("sweeping " + "; ".join(
+            f"{k} over {', '.join(str(v) for v in vs)}" for k, vs in knobs))
     if args.limit:
         designs = designs[:args.limit]
 
@@ -225,18 +425,31 @@ def main():
               "  Build them first, or drop the VLEN axis from the grid.")
 
     jsonl = out / "sweep.jsonl"
+    total = len(designs) * len(args.models)
+    prog = Progress(total, args.progress)
     n = 0
     with jsonl.open("w") as fh:
         for d in designs:
             for model in args.models:
-                row = run_cell(d, model, out, args.host, args.power, args.images)
+                # The slug's trailing hash disambiguates directories, not
+                # humans; drop it for the display only.
+                shown = design_mod.slug(d)
+                if shown != "baseline":
+                    shown = shown.rsplit("-", 1)[0]
+                prog.start(f"{shown} \u00b7 {Path(model).name}")
+                row = run_cell(d, model, out, args.host, args.power, args.images,
+                               progress=prog, frontend=args.frontend,
+                               serial=args.serial)
                 fh.write(json.dumps(row) + "\n")
                 fh.flush()
                 n += 1
-                cyc = row.get("cycles_per_image") or row.get("cycles_per_clip") or row.get("cycles")
-                print(f"[{n:3}] {row['design_slug'][:34]:34} {row['model']:8} "
-                      f"{row['status']:12} cycles={cyc} wall={row.get('wall_s')}s")
+                prog.finish(row)
+    prog.done_all()
+
+    rows = [json.loads(l) for l in jsonl.read_text().splitlines() if l.strip()]
+    ok = sum(1 for r in rows if r["status"] == "ok")
     print(f"\n{n} rows -> {jsonl}")
+    print(f"{ok} ok, {n - ok} not, in {Progress._clock(time.time() - prog.t0)}")
 
 
 if __name__ == "__main__":

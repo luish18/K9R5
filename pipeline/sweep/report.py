@@ -35,11 +35,17 @@ def cycles_of(row):
 
 
 def sensitivity(rows, model):
-    """Per-knob effect on cycles, against the baseline of the same model."""
+    """Per-knob effect on cycles, against the baseline of the same model.
+
+    Returns the baseline cycles, the per-knob effects, and the baseline design
+    itself -- the last so the table can show what each knob was moved *from*.
+    A row reading "TCDM_SIZE 65536 +222%" does not say whether that is half the
+    baseline or twice it.
+    """
     mine = [r for r in rows if r["model"] == model and r["status"] == "ok"]
     base = next((r for r in mine if r["design_slug"] == "baseline"), None)
     if base is None:
-        return None, []
+        return None, [], {}
     b = cycles_of(base)
 
     effects = defaultdict(list)
@@ -53,7 +59,8 @@ def sensitivity(rows, model):
         knob, value = next(iter(diff.items()))
         c = cycles_of(r)
         effects[knob].append((value, c, 100.0 * (c - b) / b))
-    return b, sorted(effects.items(), key=lambda kv: -max(abs(p[2]) for p in kv[1]))
+    return (b, sorted(effects.items(), key=lambda kv: -max(abs(p[2]) for p in kv[1])),
+            base["design"])
 
 
 def pareto(points):
@@ -86,14 +93,20 @@ def main():
         print()
 
     for model in sorted({r["model"] for r in ok}):
-        base, eff = sensitivity(rows, model)
+        base, eff, base_design = sensitivity(rows, model)
         if base is None:
             continue
         print(f"=== {model}: sensitivity (baseline {base:,} cycles) ===\n")
-        print(f"  {'knob':20} {'value':>10} {'cycles':>12} {'vs base':>9}")
+        # Base cycles repeat down the column, but keeping them on the row makes
+        # a line self-contained: grepped, pasted or compared across models, it
+        # still says what it was measured against.
+        print(f"  {'knob':20} {'base':>10} {'value':>10} "
+              f"{'base cycles':>13} {'cycles':>12} {'vs base':>9}")
         for knob, pts in eff:
+            was = base_design.get(knob, "?")
             for value, c, pct in sorted(pts):
-                print(f"  {knob:20} {value:>10} {c:>12,} {pct:>+8.1f}%")
+                print(f"  {knob:20} {was:>10} {value:>10} "
+                      f"{base:>13,} {c:>12,} {pct:>+8.1f}%")
         flat = [k for k, pts in eff if all(abs(p[2]) < 0.05 for p in pts)]
         if flat:
             print(f"\n  No measurable effect: {', '.join(flat)}")

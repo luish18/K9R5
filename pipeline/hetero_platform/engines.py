@@ -56,9 +56,25 @@ _FP32 = PointerClass(float32_t)
 # holds the cluster's own data, its per-core stacks and the mailbox, so this is
 # deliberately below the raw size; cluster_main.c refuses a job that does not
 # fit and the host reports it rather than computing on main memory by accident.
-TCDM_BUDGET = system.TCDM_SIZE - system.MAILBOX_SIZE \
-    - system.SNITCH_CLUSTER.nb_core * system.CLUSTER_STACK_SIZE \
-    - 8 * 1024
+def tcdm_budget(cluster) -> int:
+    """Bytes of `cluster`'s TCDM a job may use for its operands.
+
+    Per cluster, because the stacks come out of the scratchpad and the two
+    clusters need not have the same number of cores. This was a single constant
+    derived from the Snitch cluster and applied to both, which was correct only
+    while both were 9 cores: raising SNITCH_NB_CORE to 17 shrank the budget from
+    85,504 to 52,736 bytes for the *Spatz* cluster too, pushing a Conv node that
+    fits Spatz perfectly well onto the host and making a sweep over Snitch core
+    count read as a 62% slowdown that had nothing to do with the hardware.
+    """
+    return (system.TCDM_SIZE - system.MAILBOX_SIZE
+            - cluster.nb_core * system.CLUSTER_STACK_SIZE
+            - 8 * 1024)
+
+
+# Kept for callers that want the historical single figure; the engines below
+# each use their own cluster's.
+TCDM_BUDGET = tcdm_budget(system.SNITCH_CLUSTER)
 
 
 def _bindings(checker, template):
@@ -150,11 +166,13 @@ class SnitchClusterEngine(ClusterEngine):
     decoupled FP subsystem with the SSR data movers and the FREP sequencer."""
 
     def __init__(self, name: str = "snitch", enabled: bool = True) -> None:
-        super().__init__(name, "HES_ENGINE_SNITCH", enabled = enabled)
+        super().__init__(name, "HES_ENGINE_SNITCH", enabled = enabled,
+                         tcdm_budget = tcdm_budget(system.SNITCH_CLUSTER))
 
 
 class SpatzClusterEngine(ClusterEngine):
     """One Snitch core with a 4-lane Spatz vector unit, plus a DMA core."""
 
     def __init__(self, name: str = "spatz", enabled: bool = True) -> None:
-        super().__init__(name, "HES_ENGINE_SPATZ", enabled = enabled)
+        super().__init__(name, "HES_ENGINE_SPATZ", enabled = enabled,
+                         tcdm_budget = tcdm_budget(system.SPATZ_CLUSTER))
