@@ -26,6 +26,7 @@ Structure, and why:
 """
 
 import argparse
+import difflib
 import json
 import os
 import shutil
@@ -65,15 +66,72 @@ OFAT = {
 }
 
 
-def expand(grid_name: str):
-    """The design points of a named grid, baseline first."""
-    if grid_name != "ofat":
-        raise SystemExit(f"unknown grid: {grid_name}")
+def parse_knob(spec: str):
+    """One --knob KNOB=v1,v2,... into (knob, [values]).
+
+    Values go through int(v, 0), so 0x40000 and 262144 are both accepted -- the
+    sizes read naturally either way and the design file records the same number.
+
+    An unknown knob is refused rather than ignored: silently sweeping nothing
+    would produce a grid of identical designs and a sensitivity table of zeros,
+    which looks like a finding.
+    """
+    if "=" not in spec:
+        raise SystemExit(f"--knob wants KNOB=v1,v2,...; got {spec!r}")
+    knob, _, values = spec.partition("=")
+    knob = knob.strip().upper()
+    if knob not in design_mod.DEFAULTS:
+        # Substring matching misses the realistic typo: SPATZ_LANES is neither
+        # a substring nor a superstring of SPATZ_NB_LANES.
+        near = difflib.get_close_matches(knob, design_mod.DEFAULTS, n=3, cutoff=0.6)
+        hint = f" Did you mean {', '.join(near)}?" if near else ""
+        raise SystemExit(f"unknown knob {knob!r}.{hint}\n"
+                         f"  Known knobs: {', '.join(sorted(design_mod.DEFAULTS))}")
+    out = []
+    for v in values.split(","):
+        v = v.strip()
+        if not v:
+            continue
+        try:
+            out.append(int(v, 0))
+        except ValueError:
+            raise SystemExit(f"--knob {knob}: {v!r} is not an integer")
+    if not out:
+        raise SystemExit(f"--knob {knob}: no values given")
+    return knob, out
+
+
+def expand(grid_name: str, knobs=None):
+    """The design points to run, baseline first.
+
+    The baseline is always included, and always first: every number the report
+    quotes is relative to it, so a sweep without it has nothing to compare
+    against.
+    """
     designs = [{}]
-    for knob, values in OFAT.items():
-        for v in values:
-            designs.append({knob: v})
-    return designs
+    if knobs:
+        for knob, values in knobs:
+            for v in values:
+                designs.append({knob: v})
+    else:
+        if grid_name != "ofat":
+            raise SystemExit(f"unknown grid: {grid_name}")
+        for knob, values in OFAT.items():
+            for v in values:
+                designs.append({knob: v})
+
+    # Drop repeats by what the design actually resolves to, not by how it was
+    # written. Sweeping a knob over its own baseline value -- SPATZ_NB_LANES=4
+    # when 4 is the default -- otherwise runs the baseline twice and reports it
+    # as two cells.
+    seen, unique = set(), []
+    for d in designs:
+        key = design_mod.slug(d)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(d)
+    return unique
 
 
 
@@ -300,7 +358,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--models", nargs="+", required=True, help="op directories")
-    ap.add_argument("--grid", default="ofat")
+    ap.add_argument("--grid", default="ofat",
+                    help="named grid to run when no --knob is given (default: %(default)s)")
+    ap.add_argument("--knob", action="append", default=[], metavar="KNOB=v1,v2",
+                    help="sweep just this knob over these values, instead of the "
+                         "named grid. Repeatable. The baseline is always included, "
+                         "since every reported figure is relative to it. "
+                         "e.g. --knob SPATZ_NB_LANES=2,4,8")
     ap.add_argument("-o", "--out", required=True, help="sweep output directory")
     ap.add_argument("--host", default="cva6", choices=("cva6", "ara"))
     ap.add_argument("--power", action="store_true", help="measure energy too (slower)")
@@ -316,7 +380,11 @@ def main():
     # relative to the repository root.
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    designs = expand(args.grid)
+    knobs = [parse_knob(k) for k in args.knob]
+    designs = expand(args.grid, knobs)
+    if knobs:
+        print("sweeping " + "; ".join(
+            f"{k} over {', '.join(str(v) for v in vs)}" for k, vs in knobs))
     if args.limit:
         designs = designs[:args.limit]
 
