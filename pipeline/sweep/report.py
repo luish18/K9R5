@@ -97,11 +97,16 @@ def main():
         if base is None:
             continue
         print(f"=== {model}: sensitivity (baseline {base:,} cycles) ===\n")
-        print(f"  {'knob':20} {'base':>10} {'value':>10} {'cycles':>12} {'vs base':>9}")
+        # Base cycles repeat down the column, but keeping them on the row makes
+        # a line self-contained: grepped, pasted or compared across models, it
+        # still says what it was measured against.
+        print(f"  {'knob':20} {'base':>10} {'value':>10} "
+              f"{'base cycles':>13} {'cycles':>12} {'vs base':>9}")
         for knob, pts in eff:
             was = base_design.get(knob, "?")
             for value, c, pct in sorted(pts):
-                print(f"  {knob:20} {was:>10} {value:>10} {c:>12,} {pct:>+8.1f}%")
+                print(f"  {knob:20} {was:>10} {value:>10} "
+                      f"{base:>13,} {c:>12,} {pct:>+8.1f}%")
         flat = [k for k, pts in eff if all(abs(p[2]) < 0.05 for p in pts)]
         if flat:
             print(f"\n  No measurable effect: {', '.join(flat)}")
