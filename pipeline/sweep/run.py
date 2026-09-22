@@ -277,7 +277,8 @@ def calibrate(design_dir, mesh, env, host):
     return rates
 
 
-def run_cell(design, model, out_dir, host, power, images, progress=None):
+def run_cell(design, model, out_dir, host, power, images, progress=None,
+             frontend=None, serial=False):
     """One (design, model) measurement."""
     def phase(name):
         if progress is not None:
@@ -293,6 +294,10 @@ def run_cell(design, model, out_dir, host, power, images, progress=None):
 
     row = {"design_slug": slug, "design": design_mod.resolve(design),
            "model": Path(model).name, "host": host}
+    if frontend:
+        row["frontend"] = frontend
+    if serial:
+        row["serial"] = True
 
     bad = design_mod.validate(design)
     if bad:
@@ -316,6 +321,12 @@ def run_cell(design, model, out_dir, host, power, images, progress=None):
                "--out", result, "--images", images, "-q"]
         if power:
             cmd.append("--power")
+        # Only meaningful for an op that runs a front-end on its own cluster;
+        # run_hetero ignores them otherwise.
+        if frontend:
+            cmd += ["--frontend", frontend]
+        if serial:
+            cmd.append("--serial")
         phase("codegen + build + simulate")
         r = sh(cmd, env=env)
         if not result.exists():
@@ -324,7 +335,13 @@ def run_cell(design, model, out_dir, host, power, images, progress=None):
         res = json.load(result.open())["result"]
         row["status"] = res.get("status", "unknown")
         for k in ("cycles", "cycles_per_image", "cycles_per_clip", "accuracy",
-                  "offload_failures", "maxdiff", "caches", "per_engine_cycles"):
+                  "offload_failures", "maxdiff", "caches", "per_engine_cycles",
+                  # KWS runs both clusters at once, so its result is a max
+                  # rather than a sum. Dropping these would leave a sweep over
+                  # cluster geometry unable to say whether a design improved the
+                  # overlap, which is the whole point of that workload.
+                  "frontend_engine", "frontend_busy", "frontend_wait",
+                  "hidden_cycles", "cluster_busy", "pipelined", "images", "clips"):
             if k in res:
                 row[k] = res[k]
         if row["status"] == "ok" and res.get("offload_failures"):
@@ -368,6 +385,12 @@ def main():
     ap.add_argument("-o", "--out", required=True, help="sweep output directory")
     ap.add_argument("--host", default="cva6", choices=("cva6", "ara"))
     ap.add_argument("--power", action="store_true", help="measure energy too (slower)")
+    ap.add_argument("--frontend", choices=("snitch", "spatz"), default=None,
+                    help="for keyword spotting: which cluster runs the MFCC "
+                         "front-end while the other runs the classifier")
+    ap.add_argument("--serial", action="store_true",
+                    help="for keyword spotting: take turns instead of pipelining, "
+                         "which is the comparison that shows what the overlap buys")
     ap.add_argument("--images", default="16", help="samples per model run")
     ap.add_argument("--limit", type=int, default=None, help="stop after N designs")
     ap.add_argument("--progress", choices=("auto", "bar", "lines"), default="auto",
@@ -415,7 +438,8 @@ def main():
                     shown = shown.rsplit("-", 1)[0]
                 prog.start(f"{shown} \u00b7 {Path(model).name}")
                 row = run_cell(d, model, out, args.host, args.power, args.images,
-                               progress=prog)
+                               progress=prog, frontend=args.frontend,
+                               serial=args.serial)
                 fh.write(json.dumps(row) + "\n")
                 fh.flush()
                 n += 1
