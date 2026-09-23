@@ -52,6 +52,44 @@ docker run --rm -it hetero-sim bash                                           # 
 The image bakes in the built GVSoC targets, so no fetching happens at container start;
 only the `docker build` needs network access.
 
+The build is not quick. `setup.sh` clones GVSoC *with all its submodules*, downloads the
+toolchain, applies the patches in `deps/patches/`, and compiles ten targets in four
+flavours each (optim, debug, profile, asserts -- `--trace`, `--vcd`, `--gui` and
+`--power` select between them at run time, so none of them is optional). Budget tens of
+minutes and about 6 GB.
+
+#### Developing against the image
+
+`COPY . .` and `RUN ./setup.sh` are one layer, so touching any tracked file invalidates
+it and re-clones GVSoC from scratch. That is the wrong loop for changing a model. Mount
+the working tree into a long-lived container instead, and rebuild only what changed:
+
+```bash
+docker run -dit --name hetero-sim-dev -w /workspace \
+  -v "$PWD/Makefile:/workspace/Makefile" -v "$PWD/ops:/workspace/ops" \
+  -v "$PWD/pipeline:/workspace/pipeline" -v "$PWD/results:/workspace/results" \
+  -v "$PWD/runtime:/workspace/runtime" -v "$PWD/targets:/workspace/targets" \
+  -v "$PWD/work:/workspace/work" -v "$PWD/deps/patches:/workspace/deps/patches" \
+  hetero-sim bash
+
+docker exec hetero-sim-dev bash -lc 'cd /workspace && make gvsoc'   # ~1 min incremental
+docker exec hetero-sim-dev bash -lc 'cd /workspace && make mesh-probe'
+```
+
+Everything under those mounts is the host's, so an edit is visible immediately: Python
+targets and pipeline changes need no rebuild at all, and a C++ model (say
+`targets/hetero/timing_cache.cpp`) needs only `make gvsoc`, which recompiles the one
+component rather than the world.
+
+Two things to know about that container:
+
+- **Its output is owned by root.** `work/` files it writes cannot be removed from the
+  host shell; clean them from inside (`docker exec <ctr> rm -rf /workspace/work/<dir>`).
+- **The image goes stale.** It carries the GVSoC that was built from `targets/` at image
+  build time, so after a change to a C++ model the image and the container disagree
+  until one of them is rebuilt. Rebuild the image when you want a clean reproducible
+  environment or to hand it to someone else; use `make gvsoc` while developing.
+
 ## Usage
 
 Run a bundled Deeploy single-op test (`network.onnx` + `inputs.npz` + `outputs.npz`):
